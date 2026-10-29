@@ -1,0 +1,15 @@
+# HTTPS is automatic (Let's Encrypt). Point both DNS A-records at the EC2 IP first.
+{$API_DOMAIN} {
+	encode gzip
+	# SSE must not be buffered
+	reverse_proxy api:8000 {
+		flush_interval -1
+	}
+}
+
+{$WEB_DOMAIN} {
+	encode gzip
+	reverse_proxy web:3000 {
+		flush_interval -1
+	}
+}

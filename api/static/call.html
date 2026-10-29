@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guru Line · Call</title>
+<style>
+  :root { --bg:#0f172a; --card:#111c33; --ink:#e2e8f0; --mute:#94a3b8; --acc:#22c55e; --warn:#f59e0b; --err:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink);
+         min-height:100vh; display:flex; justify-content:center; }
+  main { width:100%; max-width:520px; padding:24px 16px 120px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--mute); font-size:14px; margin:0 0 20px; }
+  .orb { width:140px; height:140px; border-radius:50%; margin:24px auto; background:radial-gradient(circle,#1e293b,#0b1222);
+         border:3px solid #334155; display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--mute);
+         transition:border-color .2s, box-shadow .2s; text-align:center; padding:12px; }
+  .orb.listening { border-color:var(--acc); box-shadow:0 0 0 calc(var(--lvl,0) * 28px) rgba(34,197,94,.18); }
+  .orb.thinking { border-color:var(--warn); }
+  .orb.speaking { border-color:#38bdf8; box-shadow:0 0 24px rgba(56,189,248,.35); }
+  button { font:inherit; border:0; border-radius:12px; padding:14px 18px; cursor:pointer; }
+  button:focus-visible, input:focus-visible { outline:3px solid #38bdf8; outline-offset:2px; }
+  .start { display:block; width:100%; background:var(--acc); color:#052e16; font-weight:700; font-size:18px; }
+  .end { background:var(--err); color:white; }
+  .row { display:flex; gap:8px; margin-top:12px; }
+  .row input { flex:1; border-radius:12px; border:1px solid #334155; background:var(--card); color:var(--ink); padding:12px; font:inherit; }
+  .row button { background:#334155; color:var(--ink); }
+  #log { margin-top:20px; display:flex; flex-direction:column; gap:8px; }
+  .msg { padding:10px 12px; border-radius:12px; max-width:88%; }
+  .guru { background:var(--card); align-self:flex-start; }
+  .me { background:#14532d; align-self:flex-end; }
+  .note { color:var(--mute); font-size:13px; align-self:center; }
+  .bar { position:fixed; left:0; right:0; bottom:0; background:rgba(15,23,42,.95); border-top:1px solid #1e293b; padding:12px 16px; }
+  .bar .inner { max-width:520px; margin:0 auto; display:flex; gap:8px; align-items:center; justify-content:space-between; }
+  .pill { font-size:12px; color:var(--mute); }
+  [hidden] { display:none !important; }
+  @media (prefers-reduced-motion: reduce) { .orb { transition:none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Guru · AI tutor</h1>
+  <p class="sub" id="sub">Tap start, allow the microphone, and just talk. / Start dabaiye aur bolna shuru kariye.</p>
+
+  <div class="orb" id="orb" aria-live="polite">Ready</div>
+  <button class="start" id="start">▶ Start call / Call shuru karein</button>
+
+  <div class="row" id="typeRow" hidden>
+    <input id="typed" placeholder="Type your answer / jawab likhein" aria-label="Type your answer" autocomplete="off">
+    <button id="send">Send</button>
+  </div>
+
+  <div id="log" role="log" aria-live="polite"></div>
+</main>
+
+<div class="bar" id="bar" hidden>
+  <div class="inner">
+    <span class="pill" id="pill">Sarvam voice</span>
+    <span>
+      <button id="talk" style="background:#334155;color:var(--ink)">🎙 Talk now</button>
+      <button class="end" id="end">End call</button>
+    </span>
+  </div>
+</div>
+
+<script>
+const token = new URLSearchParams(location.search).get("t");
+const $ = (id) => document.getElementById(id);
+const orb = $("orb"), logEl = $("log");
+let lang = "hi-IN", stream, ctx, analyser, rec, chunks = [], done = false, busy = false, listening = false;
+
+// --- tunables (voice activity detection)
+const SPEECH_RMS = 0.025, END_SILENCE_MS = 1200, MAX_UTTER_MS = 15000, NO_SPEECH_MS = 9000;
+
+function setOrb(state, label) { orb.className = "orb " + state; orb.textContent = label; }
+function add(cls, text) { const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = text;
+  logEl.appendChild(d); d.scrollIntoView({behavior: "smooth", block: "end"}); }
+function note(text) { const d = document.createElement("div"); d.className = "note"; d.textContent = text; logEl.appendChild(d); }
+
+async function api(path, body) {
+  const r = await fetch(path, body instanceof FormData ? {method: "POST", body}
+    : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || j.detail || ("HTTP " + r.status));
+  return j;
+}
+
+function speakBrowser(text) {   // fallback when Sarvam TTS is unavailable
+  return new Promise((res) => {
+    if (!("speechSynthesis" in window)) return res();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang; u.rate = 1; u.onend = res; u.onerror = res;
+    speechSynthesis.speak(u);
+  });
+}
+
+async function toWav16k(blob) {
+  const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+  const rate = 16000, off = new OfflineAudioContext(1, Math.ceil(decoded.duration * rate), rate);
+  const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+  const pcm = (await off.startRendering()).getChannelData(0);
+  const v = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+  const str = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  str(0, "RIFF"); v.setUint32(4, 36 + pcm.length * 2, true); str(8, "WAVE"); str(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) { const x = Math.max(-1, Math.min(1, pcm[i])); v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true); }
+  return new Blob([v], {type: "audio/wav"});
+}
+
+async function play(reply) {
+  add("guru", reply.reply_text);
+  setOrb("speaking", "Guru bol raha hai…");
+  // one clip per sentence (synthesised in parallel on the server): play them back to back
+  const clips = (reply.audio_parts && reply.audio_parts.length) ? reply.audio_parts : (reply.audio_b64 ? [reply.audio_b64] : []);
+  if (clips.length) {
+    for (const clip of clips) {
+      if (done) break;
+      const a = new Audio("data:" + reply.audio_mime + ";base64," + clip);
+      await new Promise((res) => { a.onended = res; a.onerror = res; a.play().catch(res); });
+    }
+  } else {
+    if (reply.tts_error) $("pill").textContent = "Browser voice (Sarvam TTS: " + reply.tts_error + ")";
+    await speakBrowser(reply.reply_text);
+  }
+}
+
+async function handle(reply) {
+  await play(reply);
+  if (reply.done) return finish();
+  listen();
+}
+
+function finish() {
+  done = true; stopMic();
+  setOrb("", "Call ended");
+  $("bar").hidden = true; $("typeRow").hidden = true;
+  note("Call ended. You can close this page. / Call khatam.");
+}
+
+function stopMic() { try { rec && rec.state !== "inactive" && rec.stop(); } catch (_) {} listening = false; }
+
+function listen() {
+  if (done || busy) return;
+  listening = true; chunks = [];
+  setOrb("listening", "Sun raha hoon… boliye");
+  rec = new MediaRecorder(stream, MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? {mimeType: "audio/webm;codecs=opus"} : {});
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const startedAt = performance.now();
+  let spoke = false, lastVoice = performance.now(), noise = 0.004, calibrated = false;
+  const buf = new Float32Array(analyser.fftSize);
+  rec.onstop = async () => {
+    listening = false;
+    if (!spoke || !chunks.length) return send(null);
+    // Sarvam STT accepts WAV/MP3/PCM, not the WebM browsers record: re-encode as 16 kHz mono WAV
+    try { send(await toWav16k(new Blob(chunks, {type: rec.mimeType || "audio/webm"}))); }
+    catch (e) { note("Could not process the recording: " + e.message); send(null); }
+  };
+  rec.start(250);
+  (function tick() {
+    if (!listening || rec.state !== "recording") return;
+    analyser.getFloatTimeDomainData(buf);
+    let s = 0; for (const v of buf) s += v * v;
+    const rms = Math.sqrt(s / buf.length), now = performance.now();
+    orb.style.setProperty("--lvl", Math.min(1, rms * 12).toFixed(2));
+    // adaptive: learn the room's background level for 350 ms, then speech = clearly louder than that
+    if (!calibrated) { noise = Math.max(noise, rms); if (now - startedAt > 350) calibrated = true; }
+    const threshold = Math.min(SPEECH_RMS, Math.max(0.008, noise * 2.5));
+    if (calibrated && rms > threshold) { spoke = true; lastVoice = now; }
+    const stop = (spoke && now - lastVoice > END_SILENCE_MS) || now - startedAt > MAX_UTTER_MS
+              || (!spoke && now - startedAt > NO_SPEECH_MS);
+    if (stop) return rec.stop();
+    requestAnimationFrame(tick);
+  })();
+}
+
+async function send(blob, text) {
+  if (done) return;
+  busy = true; setOrb("thinking", "Soch raha hoon…");
+  const fd = new FormData();
+  fd.append("token", token);
+  if (blob) fd.append("audio", blob, "utterance.wav");
+  if (text !== undefined) fd.append("text", text);
+  try {
+    const r = await api("/web-call/turn", fd);
+    if (r.user_text && blob) add("me", r.user_text);
+    if (r.stt_error) { note("Speech recognition issue (" + r.stt_error + "). You can type below."); $("typeRow").hidden = false; }
+    busy = false;
+    await handle(r);
+  } catch (e) {
+    busy = false; note("Error: " + e.message); $("typeRow").hidden = false; listen();
+  }
+}
+
+$("start").onclick = async () => {
+  if (!token) { note("This link is missing its token. Ask your teacher for a new link."); return; }
+  $("start").disabled = true;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}});
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === "suspended") await ctx.resume();
+    analyser = ctx.createAnalyser(); analyser.fftSize = 2048;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+  } catch (e) {
+    note("Microphone blocked: you can still type your answers."); $("typeRow").hidden = false;
+  }
+  try {
+    const r = await api("/web-call/start", {token});
+    $("start").hidden = true; $("bar").hidden = false;
+    $("sub").textContent = "Namaste " + r.first_name + "! Talk normally; Guru will wait for you to finish.";
+    if (r.tts_error) $("pill").textContent = "Browser voice";
+    await play(r);
+    if (r.done) return finish();
+    stream ? listen() : setOrb("", "Type below");
+  } catch (e) { $("start").disabled = false; note("Could not start: " + e.message); }
+};
+
+$("talk").onclick = () => { if (listening) rec.stop(); else if (!busy && stream) listen(); };
+$("send").onclick = () => { const v = $("typed").value.trim(); if (!v || busy) return; $("typed").value = "";
+  if (listening) { listening = false; rec.onstop = null; rec.stop(); } add("me", v); send(null, v); };
+$("typed").addEventListener("keydown", (e) => e.key === "Enter" && $("send").click());
+$("end").onclick = async () => { try { await api("/web-call/end", {token}); } catch (_) {} finish(); };
+</script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+# Local dev:   docker compose --profile local up -d postgres falkordb   (make dev does this)
+# Full stack:  docker compose --profile local --profile app up -d --build
+# Production:  docker compose --profile app --profile prod up -d --build   (DATABASE_URL -> Supabase)
+name: guruline
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["local"]
+    environment:
+      POSTGRES_USER: guru
+      POSTGRES_PASSWORD: guru
+      POSTGRES_DB: guruline
+    ports: ["54322:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guru -d guruline"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports: ["6379:6379"]
+    volumes: [falkordata:/var/lib/falkordb/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./api
+    profiles: ["app"]
+    env_file: .env
+    environment:
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: "6379"
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://guru:guru@postgres:5432/guruline}
+    depends_on:
+      falkordb: { condition: service_healthy }
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+        NEXT_PUBLIC_DEMO_PHONE: ${NEXT_PUBLIC_DEMO_PHONE:-}
+    profiles: ["app"]
+    env_file: .env
+    environment:
+      API_INTERNAL_URL: http://api:8000
+    depends_on:
+      api: { condition: service_healthy }
+    ports: ["3000:3000"]
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["prod"]
+    env_file: .env
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    depends_on: [api, web]
+
+volumes:
+  pgdata:
+  falkordata:
+  caddydata:

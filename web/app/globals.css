@@ -1,0 +1,149 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Two themes, one set of tokens. Light "sky" is the default (soft lavender -> peach, navy ink, white glass);
+   dark is kept for projectors and night use. Components only use these variables. */
+:root, [data-theme="light"] {
+  --bg: #f6f2ee;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-2: #f0ece8;
+  --line: rgba(16, 33, 58, 0.1);
+  --text: #10213a;
+  --muted: #5b6475;
+  --accent: #e8740c;      /* saffron, deep enough to read on light */
+  --accent-2: #a9540a;    /* accent used for text on tinted bubbles */
+  --m-low: #d93d42;
+  --m-mid: #c98309;
+  --m-high: #129c5e;
+  --misc: #7c5ce0;
+  --btn-bg: #10213a;      /* ink pill buttons, like premium product sites */
+  --btn-fg: #ffffff;
+  --btn-bg-hover: #1d3557;
+  --page: linear-gradient(180deg, #c6cfe6 0%, #dcdcec 18%, #ece4ea 40%, #f7ebe5 68%, #f8f1ec 100%);
+  --glass: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.6));
+  --glass-border: rgba(16, 33, 58, 0.08);
+  --card-shadow: 0 1px 2px rgba(16, 33, 58, 0.04), 0 16px 40px -22px rgba(16, 33, 58, 0.22);
+  --dot: rgba(16, 33, 58, 0.08);
+  --orb-edge: #f3dccb;
+  --skeleton-hi: #ffffff;
+  --grain: 0.025;
+  --shimmer-hi: #f7b56e;
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  --bg: #07080a;
+  --surface: #0d0f13;
+  --surface-2: #14171d;
+  --line: #232832;
+  --text: #f2f3f5;
+  --muted: #8b93a1;
+  --accent: #ff9a3d;
+  --accent-2: #ffd08a;
+  --m-low: #e5484d;
+  --m-mid: #f5a524;
+  --m-high: #3dd68c;
+  --misc: #b794f6;
+  --btn-bg: #ff9a3d;
+  --btn-fg: #0b0c0e;
+  --btn-bg-hover: #ffd08a;
+  --page: linear-gradient(180deg, #07080a, #07080a);
+  --glass: linear-gradient(135deg, rgba(22, 25, 31, 0.78), rgba(13, 15, 19, 0.62));
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --card-shadow: none;
+  --dot: rgba(255, 255, 255, 0.07);
+  --orb-edge: #0b0c0e;
+  --skeleton-hi: #1b1f27;
+  --grain: 0.03;
+  --shimmer-hi: #ffe2b8;
+  color-scheme: dark;
+}
+
+html { background: var(--bg); color: var(--text); }
+body { background: var(--page) fixed; color: var(--text); font-feature-settings: "ss01", "cv11"; -webkit-font-smoothing: antialiased; }
+
+/* film grain */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 60; opacity: var(--grain);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+/* Accent words in headlines: italic serif, warm ink (the "Proactive *Intelligence*" pattern) */
+.hl { font-style: italic; color: var(--accent); }
+
+/* Liquid-glass floating pill (nav, top bars) */
+.liquid {
+  background: var(--glass); border: 1px solid var(--glass-border);
+  backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 12px 40px -14px rgba(16, 33, 58, 0.28);
+}
+
+@layer components {
+  .card { @apply rounded-card border border-line bg-surface; box-shadow: var(--card-shadow); backdrop-filter: blur(10px); }
+  .label { @apply text-[13px] uppercase tracking-[0.14em] text-muted; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-primary { @apply btn; background: var(--btn-bg); color: var(--btn-fg); }
+  .btn-primary:hover { background: var(--btn-bg-hover); }
+  .btn-ghost { @apply btn border border-line text-text hover:bg-surface-2; }
+  .chip { @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs; }
+  .num { @apply font-mono tabular-nums; }
+}
+
+/* Demo mode: projector-friendly (+25% type), hides secondary panels */
+.demo-mode { font-size: 125%; }
+.demo-mode .demo-hide { display: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+
+/* ---------- motion & depth layer (redesign) ---------- */
+
+/* Slow aurora behind app pages: two blurred blobs drifting. Fixed, behind content, very low contrast. */
+.aurora { position: fixed; inset: -20vh -10vw auto -10vw; height: 80vh; z-index: -1; pointer-events: none; filter: blur(90px); opacity: .55; }
+.aurora::before, .aurora::after { content: ""; position: absolute; border-radius: 50%; }
+.aurora::before { width: 46vw; height: 46vw; left: 8vw; top: 0; background: radial-gradient(circle, rgba(255,154,61,.22), transparent 60%); animation: drift-a 22s ease-in-out infinite alternate; }
+.aurora::after { width: 40vw; height: 40vw; right: 6vw; top: 8vh; background: radial-gradient(circle, rgba(183,148,246,.16), transparent 60%); animation: drift-b 26s ease-in-out infinite alternate; }
+@keyframes drift-a { to { transform: translate(14vw, 8vh) scale(1.15); } }
+@keyframes drift-b { to { transform: translate(-12vw, 10vh) scale(.9); } }
+
+/* Moving highlight across accent words */
+.text-shimmer {
+  background: linear-gradient(100deg, var(--accent) 20%, var(--shimmer-hi) 40%, var(--accent) 60%);
+  background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: shimmer 5s linear infinite;
+}
+@keyframes shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+
+/* Cards: gentle lift + warm edge on hover (only where a pointer can hover) */
+@media (hover: hover) {
+  .card-hover { transition: transform .35s cubic-bezier(.2,.7,.2,1), border-color .35s, box-shadow .35s; }
+  .card-hover:hover { transform: translateY(-3px); border-color: rgba(255,154,61,.35); box-shadow: 0 18px 50px -20px rgba(255,154,61,.25); }
+}
+
+/* Glass surface for floating chrome (top bars, chat input) */
+.glass { background: var(--glass); backdrop-filter: blur(16px) saturate(1.3); -webkit-backdrop-filter: blur(16px) saturate(1.3); }
+
+/* Gradient hairline border */
+.border-gradient { position: relative; }
+.border-gradient::before {
+  content: ""; position: absolute; inset: 0; padding: 1px; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(135deg, rgba(255,154,61,.55), rgba(183,148,246,.25) 45%, rgba(35,40,50,.6));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+}
+
+/* "Guru is typing" dots */
+.typing span { display: inline-block; width: 6px; height: 6px; margin: 0 2px; border-radius: 50%; background: var(--muted); animation: typing 1.2s infinite ease-in-out; }
+.typing span:nth-child(2) { animation-delay: .15s; } .typing span:nth-child(3) { animation-delay: .3s; }
+@keyframes typing { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+
+/* Shimmering skeletons */
+.skeleton-shimmer { background: linear-gradient(90deg, var(--surface-2) 25%, var(--skeleton-hi) 50%, var(--surface-2) 75%); background-size: 200% 100%; animation: sk 1.4s infinite linear; }
+@keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora::before, .aurora::after, .text-shimmer { animation: none !important; }
+  .text-shimmer { color: var(--accent); background: none; }
+}
