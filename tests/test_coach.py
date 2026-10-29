@@ -140,7 +140,7 @@ def test_open_coaching_remembers_and_suggests(monkeypatch):
 
     assert _db.language_known(RAHUL)                                        # not asked again next call
     later = coach.system_prompt(st, "coach")
-    assert "LANGUAGE: Hinglish" in later and "MEMORY (most recent first)" in later
+    assert "LANGUAGE: Hinglish" in later and "PAST CALLS" in later
     assert "Feynman technique" in later                                     # won't be repeated
     import main
     j = TestClient(main.app).get(f"/students/{RAHUL}/journal", headers=A).json()

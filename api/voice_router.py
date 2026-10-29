@@ -127,11 +127,19 @@ def start_call(student_id: str, provider: str | None = None) -> dict:
 
     if mode in ("auto", "bolna") and bolna.enabled() and st["phone_e164"]:
         if mode == "bolna" or not bolna_blocked():
+            # the session exists before dialling: its id, Guru's opening line and memory travel with the call
+            sess = db.create_session(student_id, None, "phone", None, "open")
             try:
-                out = bolna.trigger_call(st["phone_e164"], student_id, {"first_name": st["first_name"]})
+                import phone
+                out = bolna.trigger_call(st["phone_e164"], student_id, phone.call_variables(student_id, sess["id"]),
+                                         st.get("language") if db.language_known(student_id) else None)
+                if out.get("execution_id"):
+                    db.bind_call(sess["id"], str(out["execution_id"]))
                 db.audit("system", "bolna_call_triggered", "student", student_id)
-                return {"provider": "bolna", "execution_id": out.get("execution_id"), "status": out.get("status")}
+                return {"provider": "bolna", "execution_id": out.get("execution_id"), "status": out.get("status"),
+                        "session_id": sess["id"]}
             except bolna.BolnaError as e:
+                db.run("delete from sessions where id::text=%s and transcript is null", (sess["id"],))
                 if mode == "bolna":
                     raise VoiceError(502, f"Bolna call failed: {e.message}") from e
                 if e.recipient:  # this number can't be called (e.g. unverified on a trial): don't pause Bolna

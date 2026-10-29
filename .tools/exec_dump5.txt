@@ -1,0 +1,34 @@
+===== 459a2e6c a58caf02 2026-10-29T19:58 126.0 user_hung_up Piyush
+GREETING: Hi Piyush! It's Guru, your AI coach. Just two minutes today: shall we build one line introducing your role in a meeting?
+tools: []
+assistant: Hi Piyush! It's Guru, your AI coach. Just two minutes today: shall we build one line introducing your role in a meeting?
+user: Yes. Sure. So.
+assistant: Okay.
+assistant:  Great, Piyush. What would you like guidance on today: your office intro, a work update, or asking for help politely?
+user: I want to help.
+assistant:  Do you mean asking for help politely at work? We can do that in one short line.
+user: Yeah, sure.
+assistant: Okay.
+assistant:  Good choice, Piyush. Say this one line: I need help with this task.
+user: Can be move.
+user: On the other topic. Like. AI engineer. Technology. Tip die.
+assistant:   Sure, Piyush. We can switch. Do you want to talk about becoming an AI engineer or about technology interview English?
+user: Yeah, I want to. Interview. Okay. It's.
+user: So you can ask. Yes.
+assistant:   Great. Try this: I am preparing for an AI engineer interview.
+user: Two.
+user: I do not. One. To you. Go ahead.
+assistant: Go on,
+user: I want to. Yout. Food.
+assistant:  Do you mean you want to practise interview answers about YouTube or food?
+user: No AI engineer.
+assistant:  Okay, AI engineer interview. Say this: I want to become an AI engineer.
+assistant: Hey, are you still there
+
+===== 1b88f3d7 a58caf02 2026-10-29T19:57 22.0 agent_ended_call Piyush
+GREETING: Hi Piyush! It's Guru, your AI coach. You told me you want corporate English for work. Today shall we practise introducing yourself in an office meeting?
+tools: []
+assistant: Hi Piyush! It's Guru, your AI coach. You told me you want corporate English for work. Today shall we practise introducing yourself in an office meeting?
+user: Yeah. See you.
+assistant:  Bye Piyush. Practice one short self-introduction today.
+

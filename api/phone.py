@@ -47,7 +47,13 @@ def open_session(student_id: str, call_id: str | None) -> dict:
         raise ServiceError(404, "unknown student")
     if not db.has_consent(student_id):
         raise ServiceError(403, "no guardian consent on file; the call must end politely")
-    sess = db.create_session(student_id, call_id, "phone", None, "open")
+    real_id = (call_id or "").strip()
+    real_id = real_id if real_id and not real_id.startswith("{") else None
+    fresh = None if real_id else db.one(          # a retry, or the session made when dialling this call
+        """select id::text, student_id::text, topic_id, status from sessions where student_id::text=%s
+           and channel='phone' and ended_at is null and started_at > now() - interval '20 minutes'
+           order by started_at desc limit 1""", (student_id,))
+    sess = {**fresh, "existing": True} if fresh else db.create_session(student_id, real_id, "phone", None, "open")
     if not sess["existing"]:
         events.emit(student_id, "session_started", {"session_id": sess["id"], "mode": "open", "channel": "phone"})
 
@@ -135,7 +141,8 @@ def choose_topic(session_id: str, mode: str, topic: str | None = None) -> dict:
     }
     if mode == "coach":
         notes["instruction"] = (
-            "Open coaching on what the student chose. Diagnose first (ask what exactly is hard or have them try one "
+            "Mentor them on the topic itself (its real knowledge, roadmap and next steps), not on language "
+            "practice, unless the topic IS spoken English. Diagnose first (ask what exactly is hard or have them try one "
             "small example), then teach one idea at a time with an everyday example and let them try. Explain their "
             "mistake plainly: what it is, why it happens, how to fix it. When it truly helps (once, at most twice), "
             "suggest ONE real book (exact title and author), a correctly attributed quote, or a proven method "
@@ -144,7 +151,9 @@ def choose_topic(session_id: str, mode: str, topic: str | None = None) -> dict:
     elif mode == "english":
         notes["instruction"] = ("Coach spoken English: short activities (introduce yourself, describe your day, "
                                 "role-play an interview). Correct ONE mistake per turn gently and ask them to repeat "
-                                "the better sentence. Near the end ask them to rate their confidence 1-10.")
+                                "the better sentence. Near the end ask them to rate their confidence 1-10. If they "
+                                "ask for another subject or goal, stop English practice and call choose_topic again "
+                                "with mode coach and their topic.")
     else:
         notes["instruction"] = ("Teach the chosen topic in tiny spoken steps: one idea, an everyday Indian example, "
                                 "then a quick check question. Hint before answer. Every few turns ask a quiz question.")
@@ -192,3 +201,99 @@ def end(session_id: str, safety_flag: bool = False) -> dict:
     goal = db.active_goal(sess["student_id"], sess["mode"]) if sess["mode"] in coach.MODES else None
     return {"ok": True, "next_plan": [f"10 minutes of {coach.MODE_NAME.get(sess['mode'], 'practice').lower()} tomorrow"]
             + ([f"Keep going on: {goal['aim']}"] if goal else [])}
+
+
+# ---------------------------------------------------------------- per-call variables, webhook binding, recovery
+
+
+def call_variables(student_id: str, session_id: str | None = None) -> dict:
+    """Prompt variables for one Bolna call: the spoken opening (greeting -> language question for a new student,
+    else a link to the last call + what to improve) and Guru's memory of the student, so the call is personal
+    from the first second even if a tool call is slow or fails."""
+    st = db.student(student_id)
+    if not st:
+        return {}
+    st = {**st, "id": student_id}
+    memory_txt = coach.coach_memory(st).replace("{", "(").replace("}", ")")
+    return {"student_id": student_id, "first_name": coach.spoken_name(st["first_name"]), "session_id": session_id or "",
+            "greeting": coach.opening_line(st).replace("{", "(").replace("}", ")"), "memory": memory_txt}
+
+
+def _student_from_payload(payload: dict) -> str | None:
+    ctx = payload.get("context_details") or {}
+    data = ctx.get("recipient_data") or payload.get("user_data") or {}
+    sid = data.get("student_id") if isinstance(data, dict) else None
+    if not sid:
+        num = ctx.get("recipient_phone_number") or payload.get("user_number")
+        st = db.student_by_phone(num) if num else None
+        sid = st["id"] if st else None
+    return sid if sid and db.student(sid) else None
+
+
+def session_for_call(payload: dict) -> dict | None:
+    """Find (or make) the session for a Bolna execution: by call id, else the session id we passed in, else the
+    student's fresh phone session without an id, else a new one, so a call is never lost."""
+    call_id = str(payload.get("id") or "").strip()
+    if not call_id:
+        return None
+    sess = db.session_by_call_id(call_id)
+    if sess:
+        return sess
+    student_id = _student_from_payload(payload)
+    if not student_id:
+        return None
+    data = (payload.get("context_details") or {}).get("recipient_data") or {}
+    passed = data.get("session_id") if isinstance(data, dict) else None
+    cand = db.get_session(passed) if passed else None
+    if not (cand and cand["student_id"] == student_id and not cand.get("bolna_call_id")):
+        cand = db.open_phone_session(student_id)
+    if cand:
+        db.bind_call(cand["id"], call_id)
+    else:
+        if not payload.get("transcript"):
+            return None           # nothing to keep yet (e.g. "ringing")
+        new = db.create_session(student_id, call_id, "phone", None, "open")
+        if payload.get("created_at"):
+            db.set_session_started(new["id"], payload["created_at"])
+    return db.session_by_call_id(call_id)
+
+
+_processed: set[str] = set()
+ENDED = ("completed", "call-disconnected", "failed", "no-answer", "busy", "canceled", "stopped", "error")
+
+
+def handle_webhook(payload: dict, transcript_fn) -> dict:
+    """Post-call webhook (sent on every status change). Saves the transcript, closes the session, then runs the
+    review + learner-profile update in the background. Idempotent."""
+    status = str(payload.get("status", "")).lower()
+    sess = session_for_call(payload)
+    if not sess:
+        return {"ok": True, "ignored": "no student for this call"}
+    if payload.get("transcript"):
+        db.set_transcript(sess["id"], transcript_fn(sess, str(payload["transcript"])))
+    if status in ENDED:
+        full = db.get_session(sess["id"])
+        if full["mode"] == "open":   # never picked a topic: it was an open coaching chat
+            db.run("update sessions set mode='coach' where id::text=%s", (sess["id"],))
+        end(sess["id"])
+        if sess["id"] not in _processed and not db.profile_from_session(sess["id"]):
+            _processed.add(sess["id"])     # Bolna repeats "completed": review + profile only once
+            coach._background(coach.after_call, sess["id"])
+        events.emit(sess["student_id"], "session_saved", {"session_id": sess["id"], "channel": "phone"})
+    return {"ok": True, "session_id": sess["id"]}
+
+
+def sync_recent_calls(transcript_fn, limit: int = 20) -> dict:
+    """Pull recent finished calls from Bolna and save any the webhook missed (tunnel down, older bug)."""
+    import bolna
+    saved = []
+    for ex in bolna.recent_executions(limit):
+        if str(ex.get("status", "")).lower() not in ENDED or not ex.get("transcript"):
+            continue
+        known = db.session_by_call_id(str(ex.get("id")))
+        if known and db.get_session(known["id"]).get("transcript"):
+            continue
+        r = handle_webhook(ex, transcript_fn)
+        if r.get("session_id"):
+            saved.append(r["session_id"])
+    return {"saved": saved}

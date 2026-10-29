@@ -17,6 +17,7 @@
   --m-mid: #c98309;
   --m-high: #129c5e;
   --misc: #7c5ce0;
+  --sky: #2f7fe0;         /* self-reported confidence, resources */
   --btn-bg: #10213a;      /* ink pill buttons, like premium product sites */
   --btn-fg: #ffffff;
   --btn-bg-hover: #1d3557;
@@ -44,6 +45,7 @@
   --m-mid: #f5a524;
   --m-high: #3dd68c;
   --misc: #b794f6;
+  --sky: #6cb6ff;
   --btn-bg: #ff9a3d;
   --btn-fg: #0b0c0e;
   --btn-bg-hover: #ffd08a;

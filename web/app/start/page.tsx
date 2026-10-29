@@ -19,6 +19,7 @@ export default function StartPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [grade, setGrade] = useState("");
+  const [about, setAbout] = useState("");
   const [language, setLanguage] = useState("");
   const [adult, setAdult] = useState(false);
   const [phone, setPhone] = useState("");
@@ -42,7 +43,8 @@ export default function StartPage() {
     try {
       const r = await api<{ student_id: string }>("students", {
         method: "POST",
-        body: { first_name: name.trim(), grade: grade ? Number(grade) : null, language: language || null,
+        body: { first_name: name.trim(), grade: about === "School student" && grade ? Number(grade) : null,
+                about: about || null, language: language || null,
                 is_minor: !adult, phone: phone.trim() || null, consent },
       });
       localStorage.setItem("gl:student", r.student_id);
@@ -61,9 +63,9 @@ export default function StartPage() {
     <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 pb-20 pt-6 md:px-8 lg:grid-cols-[1fr_1.05fr]">
       <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
         <div className="label">Get started</div>
-        <h1 className="mt-3 font-serif text-5xl leading-[1.05] md:text-6xl">Your own coach, <span className="hl">ready in a minute.</span></h1>
+        <h1 className="mt-3 font-serif text-5xl leading-[1.05] md:text-6xl">Your own mentor, <span className="hl">ready in a minute.</span></h1>
         <p className="mt-5 max-w-md text-lg text-muted">
-          Tell Guru a little about you. Then just talk — about any subject, exam, skill or goal. Guru remembers every call and helps you improve day by day.
+          Student, college, working or job hunting: tell Guru a little about you. Then just talk about any problem or goal: studies, career, work, skills, confidence. Guru remembers every call and helps you improve day by day.
         </p>
         <ul className="mt-7 space-y-2.5 text-muted">
           {["No app, no password — this device remembers you", "Talk in Hindi, English or a mix", "Your journal of progress builds itself"].map((t) => (
@@ -84,11 +86,18 @@ export default function StartPage() {
         </div>
         <div className="grid gap-5 sm:grid-cols-2">
           <div>
-            <label htmlFor="grade" className="mb-1.5 block text-sm font-medium">Class <span className="text-muted">(optional)</span></label>
-            <select id="grade" value={grade} onChange={(e) => setGrade(e.target.value)} className={field}>
-              <option value="">Not in school / skip</option>
-              {Array.from({ length: 12 }, (_, i) => i + 1).map((g) => <option key={g} value={g}>Class {g}</option>)}
+            <label htmlFor="about" className="mb-1.5 block text-sm font-medium">You are <span className="text-muted">(optional)</span></label>
+            <select id="about" value={about} onChange={(e) => setAbout(e.target.value)} className={field}>
+              <option value="">Skip</option>
+              {["School student", "College student", "Working professional", "Job seeker", "Business owner", "Other"]
+                .map((a) => <option key={a} value={a}>{a}</option>)}
             </select>
+            {about === "School student" && (
+              <select aria-label="Class" value={grade} onChange={(e) => setGrade(e.target.value)} className={`${field} mt-2`}>
+                <option value="">Class (optional)</option>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((g) => <option key={g} value={g}>Class {g}</option>)}
+              </select>
+            )}
           </div>
           <div>
             <label htmlFor="lang" className="mb-1.5 block text-sm font-medium">Language</label>

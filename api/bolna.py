@@ -35,8 +35,13 @@ def classify(status: int | None, body: str) -> BolnaError:
     return BolnaError(status, (body or "")[:300], limit, recipient)
 
 
-def trigger_call(phone_e164: str, student_id: str, extra: dict | None = None) -> dict:
-    body = {"agent_id": settings.bolna_agent_id, "recipient_phone_number": phone_e164,
+def agent_for(language: str | None) -> str:
+    """English speakers get the agent that listens in English (the Hindi transcriber breaks English speech)."""
+    return settings.bolna_agent_id_en if language == "en" and settings.bolna_agent_id_en else settings.bolna_agent_id
+
+
+def trigger_call(phone_e164: str, student_id: str, extra: dict | None = None, language: str | None = None) -> dict:
+    body = {"agent_id": agent_for(language), "recipient_phone_number": phone_e164,
             "user_data": {"student_id": student_id, **(extra or {})}}
     if settings.bolna_from_number:
         body["from_phone_number"] = settings.bolna_from_number
@@ -51,6 +56,19 @@ def trigger_call(phone_e164: str, student_id: str, extra: dict | None = None) ->
     if str(out.get("status", "")).lower() in ("error", "failed"):
         raise classify(200, str(out))
     return out
+
+
+def recent_executions(limit: int = 20) -> list[dict]:
+    """The agent's latest calls (transcripts included), newest first: used to recover missed webhooks."""
+    out: list[dict] = []
+    for agent in filter(None, {settings.bolna_agent_id, settings.bolna_agent_id_en}):
+        r = httpx.get(f"{API}/v2/agent/{agent}/executions",
+                      headers={"Authorization": f"Bearer {settings.bolna_api_key}"},
+                      params={"page_size": limit}, timeout=30)
+        r.raise_for_status()
+        d = r.json()
+        out += (d.get("data") if isinstance(d, dict) else d) or []
+    return sorted(out, key=lambda e: str(e.get("created_at") or ""), reverse=True)
 
 
 # ---------------------------------------------------------------- agent config (Phase 4 helper)
@@ -71,28 +89,28 @@ def tools_config() -> dict:
     defs = [
         _tool("get_session_context", "Start the call: returns session_id and what Guru remembers about the student "
               "(last call, goals, confidence, weekly progress, mistakes to fix, suggested options).",
-              {"student_id": s, "call_id": s}, ["student_id"], "Ek second..."),
+              {"student_id": s, "call_id": s}, ["student_id"], "Hmm."),
         _tool("set_language", "Save the language the student wants to talk in today (Hindi, English or Hinglish).",
               {"session_id": s, "language": {"type": "string", "enum": ["Hindi", "English", "Hinglish"]}},
-              ["session_id", "language"], "Theek hai."),
+              ["session_id", "language"], "Okay."),
         _tool("choose_topic", "The student chose what to work on. mode: coach (anything: subjects, exams, skills, "
               "goals, study habits; the default), maths (misconception drills) or english (spoken English). "
               "Returns the first question (maths) or coaching notes.",
               {"session_id": s, "mode": {"type": "string", "enum": ["coach", "maths", "english"]}, "topic": s},
-              ["session_id", "mode"], "Chaliye shuru karte hain..."),
+              ["session_id", "mode"], "Okay."),
         _tool("save_suggestion", "Save a real book, a correctly attributed quote, or a proven study method you just "
               "suggested, so the student can see it on their platform.",
               {"session_id": s, "kind": {"type": "string", "enum": ["book", "quote", "method"]}, "title": s, "by": s,
-               "why": s}, ["session_id", "kind", "title", "why"], "Theek hai."),
+               "why": s}, ["session_id", "kind", "title", "why"], "Okay."),
         _tool("set_goal", "Save a bigger goal the student just stated (e.g. 'become an AI engineer').",
-              {"session_id": s, "aim": s}, ["session_id", "aim"], "Bahut accha goal hai..."),
+              {"session_id": s, "aim": s}, ["session_id", "aim"], "Great goal."),
         _tool("submit_answer", "Grade the student's answer to the current question.",
               {"session_id": s, "question_id": s, "student_answer_text": s},
-              ["session_id", "question_id", "student_answer_text"], "Hmm, dekhte hain..."),
+              ["session_id", "question_id", "student_answer_text"], "Hmm."),
         _tool("log_confidence", "Save the student's self-reported confidence (1-10).",
               {"session_id": s, "topic": s, "phase": {"type": "string", "enum": ["before", "after"]}, "value": i},
-              ["session_id", "phase", "value"], "Theek hai."),
+              ["session_id", "phase", "value"], "Okay."),
         _tool("end_session", "End the lesson and get tomorrow's practice plan.",
-              {"session_id": s, "safety_flag": b}, ["session_id"], "Ek second..."),
+              {"session_id": s, "safety_flag": b}, ["session_id"], "Okay."),
     ]
     return {"tools": [d[0] for d in defs], "tools_params": {d[0]["name"]: d[1] for d in defs}}

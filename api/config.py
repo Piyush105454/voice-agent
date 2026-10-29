@@ -28,6 +28,13 @@ class Settings(BaseSettings):
 
     bolna_api_key: str = ""
     bolna_agent_id: str = ""
+    bolna_agent_id_en: str = ""      # same agent, English speech recognition
+    # the phone conversation's brain inside Bolna: "openai" (Bolna's own gpt-5.4-mini) or "custom" (a model you
+    # registered in Bolna > Providers, e.g. Qwen on Groq; Bolna keeps that key, it never touches this server)
+    bolna_llm: str = "openai"
+    bolna_llm_model: str = "gpt-5.4-mini"
+    bolna_llm_base_url: str = ""
+    bolna_llm_family: str = ""
     bolna_from_number: str = ""
     bolna_ip_allowlist: bool = False
     webhook_secret: str = "change-me"

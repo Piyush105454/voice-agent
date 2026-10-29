@@ -5,6 +5,7 @@ Everything degrades: no LLM -> scripted fallback lines, review from simple trans
 from __future__ import annotations
 
 import logging
+import re
 import threading
 
 import db
@@ -32,7 +33,7 @@ SKILLS = {
               "reasoning": "applies the idea to a new example or question",
               "participation": "how much and how willingly the student answered"},
 }
-MODE_NAME = {"coach": "Coaching", "english": "English speaking", "topic": "Any topic", "maths": "Maths"}
+MODE_NAME = {"coach": "Mentoring", "english": "English speaking", "topic": "Any topic", "maths": "Maths"}
 
 
 def goal_mode(mode: str) -> str:
@@ -105,7 +106,7 @@ def context(student: dict, mode: str) -> str:
     goal = db.active_goal(student["id"], goal_mode(mode))
     last = db.last_review(student["id"], mode)
     scores = db.recent_skill_averages(student["id"], mode + ".")
-    lines = [f"STUDENT: {student['first_name']}, class {student.get('grade') or '?'}, "
+    lines = [f"PERSON: {who(student)}, "
              f"prefers {'English' if student.get('language') == 'en' else 'Hinglish'}."]
     if goal:
         lines.append(f"MAIN GOAL: {goal['aim']}")
@@ -126,27 +127,56 @@ def context(student: dict, mode: str) -> str:
 LANG_NAME = {"hi": "Hindi", "en": "English", "hi-en": "Hinglish (Hindi + English mix)"}
 
 
+def who(student: dict) -> str:
+    """'Ashu, college student' / 'Riya, class 9' / 'Piyush': no assumption that everyone is in school."""
+    parts = [spoken_name(student.get("first_name")) or "Unknown"]
+    if student.get("about"):
+        parts.append(str(student["about"]))
+    elif student.get("grade"):
+        parts.append(f"class {student['grade']}")
+    return ", ".join(parts)
+
+
+def _unquote(text: str) -> str:
+    """Drop quoted practice sentences from memory: they made the next call re-drill the same line."""
+    return re.sub(r'["“][^"”]{0,160}["”]', "a practice sentence", text or "").strip()
+
+
 def coach_memory(student: dict) -> str:
-    """Day-by-day memory for open coaching: recent calls (any mode), open improvement points, goals, trends,
-    resources already suggested. Everything Guru needs to start where the student left off."""
+    """What Guru remembers at the start of a call, built for PROGRESS: the goal in the student's words, what was
+    already covered (never redo it), the next new topics, and how to coach this person. Same text for browser and
+    phone calls."""
     sid = student["id"]
-    lines = [f"STUDENT: {student['first_name']}, class {student.get('grade') or '?'}."]
+    prof = db.learner_profile(sid) or {}
+    lines = [f"PERSON: {who(student)}."]
     lines.append(f"LANGUAGE: {LANG_NAME.get(student.get('language'), 'Hinglish')} (chosen before; use it)."
                  if db.language_known(sid) else "LANGUAGE: unknown. Ask in your first turn.")
-    days = db.recent_reviews(sid, 5)
-    if days:
-        lines.append("MEMORY (most recent first):")
-        for r in days:
-            imp = "; ".join((r["improvements"] or [])[:2])
-            lines.append(f"- {_ago(r['created_at'])}, {MODE_NAME.get(r['mode'], r['mode'])}: {r['summary'] or ''}"
-                         + (f" Still to improve: {imp}" if imp else ""))
-    else:
-        lines.append("MEMORY: this is your first call with them.")
     goals = [g for g in db.list_goals(sid) if g["status"] == "active"]
-    for g in goals[:3]:
+    if prof.get("goal_in_their_words"):
+        lines.append(f"THEIR GOAL (their words): {prof['goal_in_their_words']}")
+    for g in goals[:2]:
         w = ((g.get("plan") or {}).get("weeks") or [])
         week = w[min(len(w) - 1, _week_index(g))]["focus"] if w else None
         lines.append(f"GOAL ({MODE_NAME.get(g['mode'], g['mode'])}): {g['aim']}" + (f"; this week: {week}" if week else ""))
+    days = db.recent_reviews(sid, 4)
+    if not days:
+        lines.append("MEMORY: this is your first call with them.")
+    else:
+        lines.append("PAST CALLS (done: build on them, never redo their exercises or sentences):")
+        for r in days:
+            first = _unquote((r["summary"] or "").split(". ")[0])
+            lines.append(f"- {_ago(r['created_at'])}, {MODE_NAME.get(r['mode'], r['mode'])}: {first}")
+    if prof.get("topics_covered"):
+        lines.append("TOPICS ALREADY COVERED (do not repeat): " + "; ".join(prof["topics_covered"][:8]))
+    if prof.get("next_topics"):
+        lines.append("NEXT NEW TOPICS (offer these, or follow whatever the student asks for): "
+                     + "; ".join(prof["next_topics"][:4]))
+    if days:
+        import learning_graph
+        steps = learning_graph.next_steps(sid, 3)
+        if steps:
+            lines.append("NEXT BEST STEPS (ranked from their data; use one, explain why it works in simple words): "
+                         + "; ".join(f"{x['title']} ({x['principle']})" for x in steps))
     mis = db.active_misconceptions(sid, None, 0.5)
     if mis:
         lines.append("OPEN MATHS MISCONCEPTIONS: " + ", ".join(m["name"] for m in mis[:2]))
@@ -156,6 +186,11 @@ def coach_memory(student: dict) -> str:
     given = db.recent_resources(sid, 6)
     if given:
         lines.append("ALREADY SUGGESTED (do not repeat): " + "; ".join(r["title"] for r in given))
+    notes = [(label, prof.get(key)) for key, label in PROFILE_LABELS]
+    notes = [(label, "; ".join(map(str, v[:3])) if isinstance(v, list) else v) for label, v in notes if v]
+    if notes:
+        lines.append("HOW TO COACH THEM (your notes):")
+        lines += [f"- {label}: {v}" for label, v in notes]
     return "\n".join(lines)
 
 
@@ -238,8 +273,10 @@ def set_goal(student_id: str, mode: str, aim: str, session_id: str | None) -> st
 
 def make_plan(student_id: str, mode: str, goal_id: str, aim: str) -> dict:
     st = db.student(student_id)
-    plan = chat("You design short, realistic learning plans for school students in India. Be specific and encouraging.",
-                [{"role": "user", "content": f"Student: class {st.get('grade')}, about 10 minutes of voice practice a day.\n"
+    plan = chat("You are a mentor designing short, realistic improvement plans for one person in India (a school or "
+                "college student, a working professional or a job seeker). Be specific, practical and encouraging.",
+                [{"role": "user", "content": f"Person: {who({**st, 'id': student_id})}, about 10 minutes of voice "
+                                             "mentoring a day.\n"
                                              f"Mode: {MODE_NAME[mode]}.\nTheir goal in their own words: \"{aim}\".\n"
                                              "Make a 4-week plan: each week has a focus, a checkable milestone, and "
                                              "3 short practice activities that work on a voice call. For a big career "
@@ -267,11 +304,12 @@ def evaluate(session_id: str) -> dict | None:
     mode, sid = sess["mode"], sess["student_id"]
     st = db.student(sid)
     goal = db.active_goal(sid, goal_mode(mode))
-    out = chat("You evaluate a short voice coaching session with a school student. Judge only from the transcript "
+    out = chat("You evaluate a short voice mentoring session with one learner (any age or background). Judge only "
+               "from the transcript "
                "(it is speech-to-text, so ignore spelling and filler words). Be fair, specific and kind. "
                "Never comment on mood, personality, health or family. Improvement points must be concrete "
                "and actionable (quote a better version of what the student said when useful).",
-               [{"role": "user", "content": f"Mode: {MODE_NAME[mode]}. Student: {st['first_name']}, class {st.get('grade')}.\n"
+               [{"role": "user", "content": f"Mode: {MODE_NAME[mode]}. Person: {who({**st, 'id': sid})}.\n"
                                             f"Goal: {goal['aim'] if goal else 'not set'}.\n\nTRANSCRIPT:\n{sess['transcript'][:12000]}"}],
                _review_schema(mode), max_tokens=6000, timeout=90)
     student_lines = [ln for ln in sess["transcript"].splitlines() if not ln.startswith("Guru:")]
@@ -322,11 +360,185 @@ def finish(session_id: str, safety_flag: bool = False) -> None:
 
 
 def _evaluate_safely(session_id: str) -> None:
+    after_call(session_id)
+
+
+# ---------------------------------------------------------------- learner profile (cross-call memory)
+
+PROFILE_LABELS = [("about", "About them"), ("challenges", "Open problems (problem; root cause; next action; status)"),
+                  ("solutions_tried", "Tried so far and result"), ("motivation", "What motivates them"),
+                  ("confidence_pattern", "Confidence"), ("recurring_mistakes", "Patterns to fix (one at a time)"),
+                  ("what_works", "What works with them"), ("watch_outs", "Be careful about"),
+                  ("direction", "Direction"), ("next_call_plan", "Plan for the next call")]
+
+_strs = {"type": "array", "items": {"type": "string"}}
+PROFILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "about": {"type": "string", "description": "facts the student shared about themselves: interests, aims, "
+                                                     "situation (only what they said; no personal data like address)"},
+        "motivation": {"type": "string", "description": "what seems to drive them, in their own words where possible"},
+        "confidence_pattern": {"type": "string", "description": "what they SAID about their confidence and how it "
+                                                                "changed across calls (never guessed from voice)"},
+        "recurring_mistakes": _strs,
+        "what_works": {**_strs, "description": "teaching moves that worked with THIS student, plus evidence-based "
+                                               "methods to use next (retrieval practice, spaced repetition, worked "
+                                               "examples, small wins for self-efficacy, implementation intentions)"},
+        "watch_outs": {**_strs, "description": "e.g. goes off-topic, gets discouraged by long explanations; "
+                                               "include how to handle it kindly"},
+        "goal_in_their_words": {"type": "string", "description": "what the student said they want, in their own "
+                                "words. Speech-to-text mishears: e.g. 'cooperative English' or 'कोपरेट इंग्लिश' "
+                                "from a working adult most likely means corporate (office) English. If an ACTIVE GOAL is "
+                                "more specific than the transcript, use the active goal"},
+        "challenges": {**_strs, "description": "open problems the person brought (studies, career, work, confidence, "
+                                               "habits...), each as: problem; likely root cause; next small action; "
+                                               "status new / improving / solved. Keep older ones and update status."},
+        "solutions_tried": {**_strs, "description": "what was tried so far and what happened, e.g. 'Pomodoro 25 min: "
+                                                    "helped focus 2 of 3 days'. Keep older ones."},
+        "topics_covered": {**_strs, "description": "short names of topics/situations already practised across all "
+                                                  "calls (keep the old ones, add this call's)"},
+        "next_topics": {**_strs, "description": "3 NEW topics not yet covered, in a sensible order, that move them "
+                                                "toward their goal (e.g. corporate English: introducing yourself in a "
+                                                "meeting, giving a work update, polite requests, disagreeing politely, "
+                                                "small talk with colleagues, answering interview questions)"},
+        "direction": {"type": "string", "description": "where they are heading and the next 1-2 concrete steps"},
+        "next_call_plan": {"type": "string", "description": "how the next call should MOVE FORWARD: a short warm "
+                           "check-in, then the first of next_topics through a real conversation or role-play. Never "
+                           "plan to re-practise a sentence from an earlier call."},
+        "next_call_opener": {"type": "string", "description": "ONE short spoken sentence for the next call, in the "
+                             "student's language (Hindi in Devanagari, Hinglish in Latin script, or English), under 20 words, "
+                             "no greeting, exactly one question, "
+                             "that links to their goal with a warm check-in and offers the next NEW topic, ending with "
+                             "a question, e.g. 'Last time we practised introducing yourself; today shall we try giving "
+                             "a quick work update in a meeting?'. Never a drill, never a sentence to repeat, no "
+                             "quotation marks."},
+        "language_chosen": {"anyOf": [{"type": "string", "enum": ["hi", "en", "hi-en"]}, {"type": "null"}],
+                            "description": "the language the student SAID they want to talk in (hi Hindi, en English, "
+                                           "hi-en mix); null if they never said"},
+    },
+    "required": ["about", "motivation", "confidence_pattern", "recurring_mistakes", "what_works", "watch_outs",
+                 "goal_in_their_words", "challenges", "solutions_tried", "topics_covered", "next_topics",
+                 "direction", "next_call_plan",
+                 "next_call_opener", "language_chosen"],
+    "additionalProperties": False,
+}
+
+
+def update_profile(session_id: str) -> dict | None:
+    """After every call: merge what this call showed into Guru's running notes about the student.
+    These notes open the next call (web or phone), so every call builds on the last one."""
+    sess = db.get_session(session_id)
+    if not sess or not sess.get("transcript"):
+        return None
+    sid = sess["student_id"]
+    st = db.student(sid) or {}
+    prev = db.learner_profile(sid)
+    review = db.session_review(session_id) or {}
+    active_goals = "; ".join(g["aim"] for g in db.list_goals(sid) if g["status"] == "active") or "none"
+    prev_txt = "\n".join(f"{k}: {v}" for k, v in (prev or {}).items() if k not in ("type", "updated_at")) or "none yet"
+    out = chat("You keep a mentor's private notes about one person (a student, college learner, working "
+               "professional or job seeker), used to personalise the next call. Track their real problems like a good "
+               "counsellor-mentor: the problem, its likely root cause, what they tried and whether it worked, and the "
+               "next small step. "
+               "Merge the previous notes with what this call shows: keep what is still true, update what changed, "
+               "drop what is stale. Be specific and brief (each field under 40 words). Ground advice in learning "
+               "science (retrieval practice, spacing, worked examples, growth mindset, self-efficacy through small "
+               "wins, implementation intentions) and in what actually worked for this student. Never guess mood, "
+               "health, personality or family matters; confidence is only what the student said. If the call was "
+               "off-topic or rude, note kindly how to steer them back to learning, without judging them. "
+               "Refer to the student by name, never as he or she. Coaching must PROGRESS: every call covers something "
+               "new toward the student's own goal; never plan to repeat an exercise or sentence that was already "
+               "practised. If the student asked for something different or switched topic during the call (e.g. from "
+               "English practice to becoming an AI engineer), that new topic becomes goal_in_their_words, the first "
+               "of next_topics, the direction and the next_call_opener. The transcript "
+               "is speech-to-text and often broken or misheard: do not record misrecognitions as the student's "
+               "mistakes.",
+               [{"role": "user", "content": f"Person: {who({**st, 'id': sid})}, "
+                                            f"language: {LANG_NAME.get(st.get('language'), 'unknown')}.\n"
+                                            f"ACTIVE GOALS: {active_goals}\n"
+                                            f"PREVIOUS NOTES:\n{prev_txt}\n\n"
+                                            f"THIS CALL'S REVIEW: {review.get('summary') or 'none'} "
+                                            f"Improve: {'; '.join(review.get('improvements') or [])}\n\n"
+                                            f"TRANSCRIPT ({MODE_NAME.get(sess['mode'], sess['mode'])}):\n"
+                                            f"{sess['transcript'][:10000]}"}],
+               PROFILE_SCHEMA, max_tokens=3000, timeout=90)
+    if not isinstance(out, dict):
+        return None
+    lang = out.pop("language_chosen", None)
+    if lang in LANG_NAME and not db.language_known(sid):     # e.g. said on a call whose language tool failed
+        db.remember_language(sid, lang, session_id)
+    db.save_learner_profile(sid, out, session_id)
     try:
-        evaluate(session_id)
+        graph.q("MATCH (s:Student {id:$sid}) SET s.direction=$d, s.motivation=$m",
+                {"sid": sid, "d": out.get("direction") or "", "m": out.get("motivation") or ""})
+    except Exception:
+        pass
+    return out
+
+
+GREET = {"hi": "नमस्ते {n}! मैं गुरु, आपका AI कोच।", "en": "Hi {n}! It's Guru, your AI coach.",
+         "hi-en": "Hi {n}! Guru bol raha hoon, aapka AI coach."}
+ASK_IMPROVE = {"hi": "आज क्या चल रहा है, किस बात में मदद करूँ?", "en": "What's on your mind today, what can I help you with?",
+               "hi-en": "Aaj kya chal raha hai, kis baat mein help karun?"}
+WELCOME_BACK = {"hi": "आपसे फिर बात करके अच्छा लगा।", "en": "Good to talk again.",
+                "hi-en": "Phir se baat karke accha laga."}
+FIRST_MEET = {"hi": "आपसे मिलकर बहुत खुशी हुई।", "en": "So nice to meet you.",
+              "hi-en": "Aapse milkar bahut khushi hui."}
+# A caller Guru has no profile for: warm, respectful, asks only the name (no data assumed).
+UNKNOWN_CALLER = ("Namaste! Main Guru hoon, ek AI learning coach. Aapse baat karke bahut accha laga. "
+                  "Aapka shubh naam kya hai?")
+
+
+def spoken_name(first_name: str | None) -> str:
+    """How Guru says the name: first word, capitalised ('rahul ai' -> 'Rahul', 'ASHU' -> 'Ashu')."""
+    word = (first_name or "").strip().split()
+    return word[0][:1].upper() + word[0][1:].lower() if word else ""
+
+
+def opening_line(student: dict) -> str:
+    """The first thing Guru says on a phone call (Bolna welcome message). The student signed up, so Guru already
+    knows their name and greets them by it. First call: a warm hello + the language question (or what to improve
+    if the language was chosen at sign-up). Later calls: one sentence linking to the last call. No LLM: instant."""
+    sid, n = student["id"], spoken_name(student.get("first_name"))
+    if not n:
+        return UNKNOWN_CALLER
+    prof = db.learner_profile(sid)
+    first_call = not prof and not db.one("""select 1 as ok from sessions where student_id::text=%s
+                                             and ended_at is not null limit 1""", (sid,))
+    if first_call or not db.language_known(sid):
+        return (f"Namaste {n}! Main Guru hoon, aapka AI mentor. Aapse milkar bahut khushi hui. "
+                "Hum kis language mein baat shuru karein: Hindi, English, ya dono ka mix?")
+    lang = student.get("language") if student.get("language") in GREET else "hi-en"
+    if first_call:
+        return f"{GREET[lang].format(n=n)} {FIRST_MEET[lang]} {ASK_IMPROVE[lang]}"
+    hook = ((prof or {}).get("next_call_opener") or "").strip()
+    # Claude's saved line often starts with its own greeting ("Hi Piyush," / "नमस्ते आशु,"): we already greeted
+    hook = re.sub(r"^(?:hi|hello|hey|namaste|नमस्ते|नमस्कार)[^,!।.?]{0,20}[,!।.]\s*", "", hook, flags=re.I).strip()
+    hook = hook[:1].upper() + hook[1:]
+    if hook:
+        return f"{GREET[lang].format(n=n)} {hook}"
+    return f"{GREET[lang].format(n=n)} {WELCOME_BACK[lang]} {ASK_IMPROVE[lang]}"
+
+
+def after_call(session_id: str) -> None:
+    """Review (coach modes) then the learner profile; safe to call more than once."""
+    sess = db.get_session(session_id)
+    if not sess:
+        return
+    try:
+        if sess["mode"] in MODES and sess.get("transcript") and not db.session_review(session_id):
+            evaluate(session_id)
     except Exception:
         if db.get_session(session_id) is not None:
             log.exception("evaluation failed for %s", session_id)
+    try:
+        update_profile(session_id)
+    except Exception:
+        if db.get_session(session_id) is not None:
+            log.exception("profile update failed for %s", session_id)
+    import learning_graph
+    learning_graph.sync_safely(sess["student_id"])
+    events.emit(sess["student_id"], "profile_updated", {"session_id": session_id, "graph": True})
 
 
 # ---------------------------------------------------------------- progress feedback (day / week / month)
@@ -340,7 +552,7 @@ def progress_feedback(student_id: str, period: str) -> dict:
         return {"headline": "No practice data yet.", "points": ["Do a short call to start tracking progress."],
                 "focus_next": "Start with one 10-minute session."}
     trend = _trend(series)
-    out = chat("You are a learning coach writing a short progress note for a school student. Use only the data given. "
+    out = chat("You are a mentor writing a short progress note for one learner. Use only the data given. "
                "Be honest: if something did not improve, say so kindly. No mood or personality comments.",
                [{"role": "user", "content": f"Period: by {period}.\nSkill averages (0-10) per {period}:\n"
                                             + "\n".join(f"{r['bucket']:%Y-%m-%d} {r['skill']}: {r['score']} (n={r['n']})" for r in series)

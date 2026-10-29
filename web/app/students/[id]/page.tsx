@@ -117,7 +117,7 @@ export default function StudentMemory({ params }: { params: { id: string } }) {
                 <li key={f.id} className="rounded-input border border-line p-3">
                   <div className="flex items-start justify-between gap-2">
                     {f.kind === "misconception" ? <MisconceptionChip id={f.content.id!} name={names[f.content.id!]} />
-                      : <span className="chip border border-line capitalize">{f.kind}: {pretty(f.content.id) || f.content.text}</span>}
+                      : <span className="chip border border-line capitalize">{f.content.type === "profile" ? "Learner profile" : f.kind}: {pretty(f.content.id) || f.content.text || f.content.title || f.content.direction || f.content.language || f.content.type}</span>}
                     <button onClick={() => forget(f.id)} aria-label="Delete memory" className="text-muted hover:text-m-low"><Trash2 size={14} /></button>
                   </div>
                   {f.content.evidence && <p className="mt-2 text-xs text-muted">“{f.content.evidence}”</p>}

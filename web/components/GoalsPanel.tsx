@@ -5,7 +5,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import type { Goal, Mode } from "@/lib/types";
 
-export const MODE_LABEL: Record<Mode | "open", string> = { coach: "Open coaching", maths: "Maths", english: "English speaking", topic: "Any topic", open: "Open call" };
+export const MODE_LABEL: Record<Mode | "open", string> = { coach: "Mentoring", maths: "Maths", english: "English speaking", topic: "Any topic", open: "Open call" };
 const GOAL_MODES: Mode[] = ["topic", "english", "maths"];
 const EXAMPLES: Record<Mode, string> = {
   coach: "Score 90 in my board exams",

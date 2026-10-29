@@ -1,7 +1,14 @@
 export type GraphNode = {
   id: string;
   label: string;
-  kind: "student" | "topic" | "misconception" | "strategy";
+  kind: "student" | "topic" | "misconception" | "strategy"
+    // coaching side (after any call): goal, skill (0-10), self-reported confidence, mistake pattern,
+    // topic practised, next step, suggested resource, what works for this student
+    | "goal" | "skill" | "confidence" | "pattern" | "practice" | "next" | "resource" | "works" | "challenge";
+  score?: number;
+  trend?: number;
+  value?: number | null;
+  detail?: string;
   mastery?: number | null;
   strength?: number;
   n?: number;
@@ -55,6 +62,11 @@ export type Feed = {
 
 export type Mode = "coach" | "maths" | "english" | "topic";
 export type Resource = { kind: "book" | "quote" | "method"; title: string; by: string | null; why: string; created_at?: string };
+export type LearnerProfile = {
+  about?: string; motivation?: string; confidence_pattern?: string; recurring_mistakes?: string[];
+  what_works?: string[]; watch_outs?: string[]; direction?: string; next_call_plan?: string; updated_at?: string;
+  challenges?: string[]; solutions_tried?: string[]; goal_in_their_words?: string;
+};
 export type JournalDay = {
   session_id: string; started_at: string; channel: string; mode: Mode | "open" | null; topic_id: string | null;
   summary: string | null; strengths: string[] | null; improvements: string[] | null; next_steps: string[] | null;
@@ -98,7 +110,7 @@ export type MisconceptionRow = { id: string; name: string; strength: number; evi
 export type MemoryFact = {
   id: string;
   kind: "misconception" | "strategy" | "goal" | "note";
-  content: { id?: string; text?: string; evidence?: string };
+  content: { id?: string; text?: string; evidence?: string; type?: string; title?: string; direction?: string; language?: string };
   confidence: number;
   created_at: string;
   source_session: string | null;
@@ -138,6 +150,13 @@ export type SessionPoint = {
   conf_before: number | null;
   conf_after: number | null;
 };
-export type Progress = { session_points: SessionPoint[] };
+export type SkillRow = { skill: string; label: string; score: number; trend: number; n: number; days_since: number };
+export type NextStep = { kind: string; title: string; why: string; principle: string; priority: number };
+export type Progress = {
+  session_points: SessionPoint[];
+  skills?: SkillRow[];
+  self_confidence?: { value: number; trend: number; n: number } | null;
+  next_steps?: NextStep[];
+};
 export type Student = { id: string; first_name: string; language: string; grade: number; consented: boolean };
 export type LiveEvent = { id: number; student_id: string | null; kind: string; payload: Record<string, unknown>; created_at: string };

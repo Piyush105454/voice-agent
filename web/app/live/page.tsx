@@ -36,6 +36,7 @@ export default function LivePage() {
   const [view, setView] = useState<"simple" | "advanced">("simple");
   const [browserCall, setBrowserCall] = useState(false);
   const [, tick] = useState(0);
+  const [journalTick, setJournalTick] = useState(0); // phone calls: reviews/profile arrive after the call
   useEffect(() => {
     const v = localStorage.getItem("gl:view");
     if (v === "simple" || v === "advanced") setView(v);
@@ -57,6 +58,8 @@ export default function LivePage() {
   }, []);
 
   const sessionRef = useRef<string | undefined>(); // which session the console follows
+  const wantedRef = useRef(studentId);                // replies for a student we switched away from are dropped
+  wantedRef.current = studentId;
   const load = useCallback(async (sid: string, sessionId?: string) => {
     try {
       const sess = sessionId ?? (await api<{ session: { id: string } | null }>(`live/current?student_id=${sid}`)).session?.id;
@@ -66,6 +69,7 @@ export default function LivePage() {
         api<Overview>(`students/${sid}/overview`),
         api<Progress>(`students/${sid}/progress`),
       ]);
+      if (sid !== wantedRef.current) return;
       setFeed(f);
       if (f && !sessionId) sessionRef.current = f.id;
       setGraph(g);
@@ -116,7 +120,12 @@ export default function LivePage() {
       say("Session ended · tomorrow's plan is ready", "good");
     } else if (e.kind === "safety") {
       say("Safety stop · teacher notified", "info");
+    } else if (e.kind === "session_saved") {
+      say("Phone call saved to your journal", "good");
+    } else if (e.kind === "review_ready" || e.kind === "profile_updated") {
+      say(e.kind === "review_ready" ? "Review ready · see your journal" : "Guru updated what it knows about you", "good");
     }
+    if (["session_ended", "session_saved", "review_ready", "profile_updated"].includes(e.kind)) setJournalTick((t) => t + 1);
     refresh();
   });
 
@@ -253,7 +262,7 @@ export default function LivePage() {
           transition={{ duration: 0.35, ease: [0.2, 0.7, 0.2, 1] }}>
         {error && !loading ? <div className="card"><ErrorState message={error} retry={() => load(studentId)} /></div>
         : !overview ? <div className="mx-auto max-w-6xl space-y-4"><div className="skeleton-shimmer h-28 rounded-card" /><div className="skeleton-shimmer h-[420px] rounded-card" /></div>
-        : <SimpleView ov={overview} feed={feed} onActivity={refresh} />}
+        : <SimpleView ov={overview} feed={feed} onActivity={refresh} journalTick={journalTick} />}
         </motion.div>
       ) : (<motion.div key="advanced" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
           transition={{ duration: 0.35, ease: [0.2, 0.7, 0.2, 1] }}>
@@ -318,7 +327,7 @@ export default function LivePage() {
 
           {/* right column */}
           <div className="space-y-4 lg:col-span-3">
-            <Panel title="Confidence vs accuracy" className="demo-hide">
+            <Panel title="Confidence vs performance" className="demo-hide">
               <ConfidenceAccuracyChart points={progress?.session_points ?? []} />
               {gap != null && (
                 <p className="mt-2 text-xs text-muted">
@@ -328,23 +337,46 @@ export default function LivePage() {
               )}
               <p className="mt-1 text-[11px] text-muted">Confidence is self-reported (1–10). Guru never infers feelings from voice.</p>
             </Panel>
-            <Panel title="Mastery">
-              {overview?.topics.length ? (
+            <Panel title="Mastery & skills">
+              {overview?.topics.length || progress?.skills?.length ? (
                 <div className="space-y-3">
-                  {overview.topics.map((t) => <MasteryBar key={t.topic_id} label={t.name} value={t.p_known} />)}
+                  {overview?.topics.map((t) => <MasteryBar key={t.topic_id} label={t.name} value={t.p_known} />)}
+                  {/* coaching calls: AI-judged skill scores (0-10), latest, with change over 30 days */}
+                  {progress?.skills?.map((k) => (
+                    <MasteryBar key={k.skill} value={k.score / 10} outOf10
+                      label={`${k.label}${Math.abs(k.trend) >= 0.5 ? (k.trend > 0 ? " ↑" : " ↓") : ""}`} />
+                  ))}
+                  {progress?.self_confidence && (
+                    <p className="text-xs text-muted">Self-reported confidence <span className="num text-sky">{progress.self_confidence.value}/10</span></p>
+                  )}
                 </div>
               ) : <EmptyState title="No topics practised yet" />}
             </Panel>
-            <Panel title="Next review" className="demo-hide">
-              <ul className="space-y-1.5 text-sm">
-                {[...(overview?.topics ?? [])].sort((a, b) => a.p_now - b.p_now).slice(0, 4).map((t) => (
-                  <li key={t.topic_id} className="flex justify-between gap-2">
-                    <span className="truncate">{t.name}</span>
-                    <span className="num text-muted">{t.p_now < 0.7 ? "due now" : `in ${dec(t.next_review_days, 1)} d`}</span>
-                  </li>
-                ))}
-              </ul>
-            </Panel>
+            {!!progress?.next_steps?.length && (
+              <Panel title="Next best steps" className="demo-hide">
+                <ol className="space-y-3 text-sm">
+                  {progress.next_steps.map((n, i) => (
+                    <li key={i}>
+                      <div className="font-medium">{i + 1}. {n.title}</div>
+                      <p className="mt-0.5 text-xs text-muted">{n.why}</p>
+                      <span className="mt-1 inline-block rounded-full border border-line px-2 py-0.5 text-[10px] text-accent">{n.principle}</span>
+                    </li>
+                  ))}
+                </ol>
+              </Panel>
+            )}
+            {!!overview?.topics.length && (
+              <Panel title="Next review" className="demo-hide">
+                <ul className="space-y-1.5 text-sm">
+                  {[...overview.topics].sort((a, b) => a.p_now - b.p_now).slice(0, 4).map((t) => (
+                    <li key={t.topic_id} className="flex justify-between gap-2">
+                      <span className="truncate">{t.name}</span>
+                      <span className="num text-muted">{t.p_now < 0.7 ? "due now" : `in ${dec(t.next_review_days, 1)} d`}</span>
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            )}
           </div>
         </div>
       )}

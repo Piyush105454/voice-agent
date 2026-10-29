@@ -1,12 +1,12 @@
 "use client";
 // "Your learning journal": what Guru suggested (books, quotes, methods) + a day-by-day timeline of calls,
 // each with what improved and what is still to fix. Same data for phone and browser calls.
-import { BookOpen, Lightbulb, NotebookPen, Quote } from "lucide-react";
+import { BookOpen, Compass, Lightbulb, NotebookPen, Quote, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { MODE_LABEL } from "@/components/GoalsPanel";
 import { Stagger, StaggerItem } from "@/components/motion";
 import { api } from "@/lib/api";
-import type { JournalDay, Resource } from "@/lib/types";
+import type { JournalDay, LearnerProfile, Resource } from "@/lib/types";
 
 const KIND = {
   book: { icon: BookOpen, label: "Book" },
@@ -34,16 +34,45 @@ function ResourceCard({ r }: { r: Resource }) {
   );
 }
 
+function ProfileCard({ p }: { p: LearnerProfile }) {
+  const rows: [string, string | string[] | undefined][] = [
+    ["What you are working on", p.challenges], ["Tried so far", p.solutions_tried],
+    ["What drives you", p.motivation], ["Your confidence", p.confidence_pattern],
+    ["What works for you", p.what_works], ["Keep fixing", p.recurring_mistakes],
+  ];
+  return (
+    <div className="border-gradient mb-7 rounded-card bg-surface p-5">
+      <div className="flex items-center gap-2 text-sm font-medium"><Sparkles size={16} className="text-accent" aria-hidden />
+        What Guru knows about you <span className="text-xs font-normal text-muted">· updated after every call</span></div>
+      {p.direction && (
+        <p className="mt-3 flex gap-2 font-serif text-lg leading-snug"><Compass size={18} className="mt-1 shrink-0 text-accent" aria-hidden />{p.direction}</p>
+      )}
+      <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+        {rows.filter(([, v]) => v && (!Array.isArray(v) || v.length)).map(([k, v]) => (
+          <div key={k}>
+            <dt className="label">{k}</dt>
+            <dd className="mt-1 text-sm text-muted">{Array.isArray(v) ? v.slice(0, 3).join(" · ") : v}</dd>
+          </div>
+        ))}
+      </dl>
+      {p.next_call_plan && <p className="mt-4 rounded-input bg-surface-2/70 px-3 py-2 text-sm"><span className="text-accent">Next call:</span> {p.next_call_plan}</p>}
+    </div>
+  );
+}
+
 export default function JournalPanel({ studentId, refreshKey }: { studentId: string; refreshKey: number }) {
-  const [data, setData] = useState<{ days: JournalDay[]; resources: Resource[] } | null>(null);
+  type Journal = { days: JournalDay[]; resources: Resource[]; profile: LearnerProfile | null };
+  const [data, setData] = useState<Journal | null>(null);
   useEffect(() => {
-    api<{ days: JournalDay[]; resources: Resource[] }>(`students/${studentId}/journal`).then(setData).catch(() => setData(null));
+    api<Journal>(`students/${studentId}/journal`).then(setData).catch(() => setData(null));
   }, [studentId, refreshKey]);
 
   return (
     <section className="card p-6" aria-label="Your learning journal">
       <div className="mb-1 flex items-center gap-2 font-medium"><NotebookPen size={18} className="text-accent" aria-hidden /> Your learning journal</div>
       <p className="mb-5 text-sm text-muted">Every call, day by day — what got better, what to fix next, and what Guru suggested.</p>
+
+      {data?.profile && <ProfileCard p={data.profile} />}
 
       {data?.resources.length ? (
         <>

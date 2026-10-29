@@ -8,7 +8,7 @@ from pg import json, run
 
 log = logging.getLogger("events")
 KINDS = {"session_started", "attempt", "confidence", "misconception_detected", "session_ended", "safety",
-         "voice_provider", "review_ready", "coach_turn"}
+         "voice_provider", "review_ready", "coach_turn", "session_saved", "profile_updated"}
 
 
 def emit(student_id: str | None, kind: str, payload: dict) -> None:

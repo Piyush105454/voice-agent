@@ -68,8 +68,8 @@ def all_session_topics() -> list[dict]:
 
 
 def student(student_id: str) -> dict | None:
-    return one("""select id::text, first_name, language, grade, phone_e164, is_minor, active, class_id::text,
-                         call_window_start, call_window_end
+    return one("""select id::text, first_name, language, grade, about, phone_e164, is_minor, active,
+                         class_id::text, call_window_start, call_window_end
                   from students where id::text=%s""", (student_id,))
 
 
@@ -85,14 +85,15 @@ def list_students() -> list[dict]:
 
 
 def create_student(first_name: str, grade: int | None, language: str | None, is_minor: bool,
-                   phone: str | None, consent_given_by: str) -> str:
+                   phone: str | None, consent_given_by: str, about: str | None = None) -> str:
     """Sign-up: one profile + the consent captured once (so calls never have to read a recording notice).
     consent_given_by: 'guardian' (minor) or 'student_adult'. All three purposes are recorded with the sign-up."""
     with tx() as conn:
-        sid = conn.execute("""insert into students(class_id, first_name, phone_e164, language, grade, is_minor)
-                              values ((select id from classes order by name limit 1), %s, %s, %s, %s, %s)
+        sid = conn.execute("""insert into students(class_id, first_name, phone_e164, language, grade, is_minor, about)
+                              values ((select id from classes order by name limit 1), %s, %s, %s, %s, %s, %s)
                               returning id::text""",
-                           (first_name.strip()[:40], phone or None, language or "hi-en", grade, is_minor)).fetchone()["id"]
+                           (first_name.strip()[:40], phone or None, language or "hi-en", grade, is_minor,
+                            (about or "").strip()[:120] or None)).fetchone()["id"]
         for purpose in ("voice_tutoring", "recording", "teacher_sharing"):
             cid = conn.execute("""insert into consents(student_id, given_by, purpose, granted) values (%s,%s,%s,true)
                                   returning id""", (sid, consent_given_by, purpose)).fetchone()["id"]
@@ -190,6 +191,9 @@ def next_question(session_id: str, student_id: str, topic_id: str, target_mis: l
 def create_session(student_id: str, call_id: str | None, channel: str, topic_id: str | None,
                    mode: str = "maths", goal_id: str | None = None) -> dict:
     """Idempotent per call_id: Bolna may call get_session_context more than once on a call."""
+    call_id = (call_id or "").strip() or None      # an unfilled prompt variable arrives as "" -> treat as unknown
+    if call_id and call_id.startswith("{"):
+        call_id = None
     if call_id:
         r = one("select id::text, student_id::text, topic_id, status from sessions where bolna_call_id=%s",
                 (call_id,))
@@ -211,6 +215,46 @@ def get_session(session_id: str) -> dict | None:
 
 def session_by_call_id(call_id: str) -> dict | None:
     return one("select id::text, student_id::text, status from sessions where bolna_call_id=%s", (call_id,))
+
+
+def bind_call(session_id: str, call_id: str) -> None:
+    """Attach Bolna's execution id to a session created before/without it (so the post-call webhook finds it)."""
+    run("update sessions set bolna_call_id=%s where id::text=%s and bolna_call_id is null", (call_id, session_id))
+
+
+def open_phone_session(student_id: str, minutes: int = 20, live_only: bool = False) -> dict | None:
+    """The student's latest phone session that has no Bolna id yet (created moments ago for this call)."""
+    return one(f"""select id::text, student_id::text, status from sessions where student_id::text=%s
+                   and channel='phone' and bolna_call_id is null and started_at > now() - make_interval(mins => %s)
+                   {"and ended_at is null" if live_only else ""} order by started_at desc limit 1""",
+               (student_id, minutes))
+
+
+def set_session_started(session_id: str, started_at) -> None:
+    run("update sessions set started_at=%s where id::text=%s", (started_at, session_id))
+
+
+def learner_profile(student_id: str) -> dict | None:
+    """Guru's running picture of the student (rewritten after every call; latest wins)."""
+    r = one("""select content, created_at from memory_facts where student_id::text=%s and kind='note'
+               and content->>'type'='profile' and superseded_by is null order by created_at desc limit 1""",
+            (student_id,))
+    return {**r["content"], "updated_at": r["created_at"]} if r else None
+
+
+def profile_from_session(session_id: str) -> bool:
+    return bool(one("""select 1 as ok from memory_facts where source_session::text=%s and kind='note'
+                       and content->>'type'='profile' limit 1""", (session_id,)))
+
+
+def save_learner_profile(student_id: str, profile: dict, session_id: str | None) -> None:
+    with tx() as conn:
+        new_id = conn.execute("""insert into memory_facts(student_id, kind, content, confidence, source_session)
+                                 values (%s,'note',%s,0.8,%s) returning id::text""",
+                              (student_id, json({**profile, "type": "profile"}), session_id)).fetchone()["id"]
+        conn.execute("""update memory_facts set superseded_by=%s where student_id::text=%s and kind='note'
+                        and content->>'type'='profile' and superseded_by is null and id::text<>%s""",
+                     (new_id, student_id, new_id))
 
 
 def append_transcript(session_id: str, speaker: str, text: str) -> None:

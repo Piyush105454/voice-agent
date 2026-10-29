@@ -17,6 +17,7 @@ const config: Config = {
         "m-mid": "var(--m-mid)",
         "m-high": "var(--m-high)",
         misc: "var(--misc)",
+        sky: "var(--sky)",
       },
       fontFamily: {
         serif: ["var(--font-serif)", "Georgia", "serif"],

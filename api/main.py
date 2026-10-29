@@ -36,10 +36,26 @@ def _warm_llm_schemas() -> None:
         msgs = [{"role": "user", "content": "(warm-up: reply with minimal valid values)"}]
         for schema, purpose in ((coach.TURN_SCHEMA, "chat"), (coach.PLAN_SCHEMA, "eval"),
                                 (coach._review_schema("coach"), "eval"), (coach._review_schema("english"), "eval"),
-                                (coach._review_schema("topic"), "eval")):
+                                (coach._review_schema("topic"), "eval"), (coach.PROFILE_SCHEMA, "eval")):
             chat("Warm-up request. Keep every value very short.", msgs, schema, max_tokens=2000, timeout=60,
                  purpose=purpose)
     threading.Thread(target=warm, daemon=True, name="schema-warmup").start()
+
+    def recover():
+        try:
+            import learning_graph
+            for r in db.all_rows("select distinct student_id::text as id from session_reviews"):
+                learning_graph.sync_safely(r["id"])
+        except Exception as e:
+            logging.getLogger("bolna").warning("learning graph backfill skipped: %s", e)
+        try:
+            out = phone.sync_recent_calls(phone_transcript, 20)
+            if out["saved"]:
+                logging.getLogger("bolna").info("recovered %d phone call(s) from Bolna history", len(out["saved"]))
+        except Exception as e:
+            logging.getLogger("bolna").warning("bolna call recovery skipped: %s", e)
+    if settings.bolna_api_key:
+        threading.Thread(target=recover, daemon=True, name="bolna-recover").start()
 STATIC = Path(__file__).resolve().parent / "static"
 
 
@@ -168,7 +184,7 @@ def bolna_suggestion(b: SuggestionIn):
 @app.get("/students/{sid}/journal", dependencies=[Depends(verify_admin)])
 def student_journal(sid: str):
     """Day-by-day learning journal + the books, quotes and methods Guru suggested."""
-    return {"days": db.journal(sid), "resources": db.recent_resources(sid, 12)}
+    return {"days": db.journal(sid), "resources": db.recent_resources(sid, 12), "profile": db.learner_profile(sid)}
 
 
 @app.post("/bolna/set_goal", dependencies=[Depends(verify_webhook)])
@@ -195,19 +211,13 @@ def bolna_end(b: EndIn):
 def bolna_post_call(payload: dict):
     """Post-call webhook: sent on every status change (same id repeated). Store the full transcript and
     close the session if the agent never called end_session. Idempotent."""
-    call_id, status = payload.get("id"), str(payload.get("status", "")).lower()
-    sess = db.session_by_call_id(call_id) if call_id else None
-    if not sess:
-        return {"ok": True, "ignored": "no session for this call"}
-    if payload.get("transcript"):
-        db.set_transcript(sess["id"], phone_transcript(sess, str(payload["transcript"])))
-    if status in ("completed", "call-disconnected", "failed", "no-answer", "busy", "canceled", "stopped"):
-        phone.end(sess["id"])
-        full = db.get_session(sess["id"])
-        # coach modes are evaluated once Bolna's full transcript is in (end_session ran mid-call, before it)
-        if full["mode"] in coach.MODES and full["transcript"] and not db.session_review(sess["id"]):
-            coach._background(coach._evaluate_safely, sess["id"])
-    return {"ok": True}
+    return phone.handle_webhook(payload, phone_transcript)
+
+
+@app.post("/bolna/sync", dependencies=[Depends(verify_admin)])
+def bolna_sync(limit: int = 20):
+    """Recover calls whose webhook never arrived (tunnel down etc.) from Bolna's call history."""
+    return phone.sync_recent_calls(phone_transcript, limit)
 
 
 def phone_transcript(sess: dict, raw: str) -> str:
@@ -243,9 +253,19 @@ def bolna_inbound(contact_number: str):
     """Caller identification for inbound calls (must answer < 3 s). Keys become prompt variables."""
     st = db.student_by_phone(contact_number)
     if not st:
-        return {"student_id": "", "first_name": "", "known_caller": "false"}
-    return {"student_id": st["id"], "first_name": st["first_name"], "language": st["language"],
-            "known_caller": "true"}
+        return {"student_id": "", "first_name": "", "known_caller": "false", "session_id": "",
+                "greeting": coach.UNKNOWN_CALLER,
+                "memory": "This caller has not signed up yet, so you know nothing about them. Be warm and respectful: "
+                          "learn their name, ask what they study or want to get better at, help with one small thing, "
+                          "and tell them that signing up on the Guru Line website lets you remember them next time. "
+                          "Do not call any tools."}
+    if not db.has_consent(st["id"]):
+        return {"student_id": st["id"], "first_name": st["first_name"], "known_caller": "true", "session_id": "",
+                "greeting": f"Namaste {coach.spoken_name(st['first_name'])}! Guru bol raha hoon. Hum baat shuru "
+                            "karein, usse pehle aapke parent ki permission chahiye. Dhanyavaad, jaldi milte hain!",
+                "memory": "No consent on file: end the call politely."}
+    sess = db.create_session(st["id"], None, "phone", None, "open")
+    return {**phone.call_variables(st["id"], sess["id"]), "language": st["language"], "known_caller": "true"}
 
 
 @app.api_route("/missed_call", methods=["GET", "POST"])
@@ -372,7 +392,8 @@ def students():
 
 class SignUpIn(BaseModel):
     first_name: str = Field(min_length=1, max_length=40)
-    grade: int | None = Field(default=None, ge=1, le=12)
+    grade: int | None = Field(default=None, ge=1, le=12)   # only for school students; Guru is for anyone
+    about: str | None = Field(default=None, max_length=120)  # "college student", "working in sales", "job seeker"…
     language: str | None = None        # hi | en | hi-en | None (Guru asks on the first call)
     is_minor: bool = True
     phone: str | None = None           # E.164, optional ("Call my phone")
@@ -390,7 +411,7 @@ def sign_up(b: SignUpIn):
     if phone and not (phone.startswith("+") and phone[1:].isdigit() and 8 <= len(phone) <= 16):
         raise HTTPException(422, "phone must look like +919876543210")
     sid = db.create_student(b.first_name, b.grade, b.language, b.is_minor, phone,
-                            "guardian" if b.is_minor else "student_adult")
+                            "guardian" if b.is_minor else "student_adult", b.about)
     if b.language:
         db.remember_language(sid, b.language, None)   # chosen at sign-up: Guru won't ask again
     try:
@@ -412,12 +433,43 @@ def student_detail(sid: str):
 
 @app.get("/students/{sid}/graph", dependencies=[Depends(verify_admin)])
 def student_graph(sid: str):
-    return graph.neighbourhood(sid, 80)
+    import learning_graph
+    g = graph.neighbourhood(sid, 80)
+    if not g["nodes"]:
+        return g
+    try:
+        nodes, links = learning_graph.nodes_for(sid)
+    except Exception:
+        nodes, links = [], []
+    have = {n["id"] for n in g["nodes"]}
+    g["nodes"] += [n for n in nodes if n["id"] not in have]
+    g["links"] += links
+    return g
 
 
 @app.get("/students/{sid}/progress", dependencies=[Depends(verify_admin)])
 def progress(sid: str):
-    return db.progress_series(sid)
+    """Maths series + the coaching view: skills, self-reported confidence, research-ranked next steps, and
+    per-call points (AI-judged skill average vs self-reported confidence) for the confidence chart."""
+    import learning_graph
+    out = db.progress_series(sid)
+    coach_pts = db.all_rows("""select s.id::text as session_id, s.started_at, s.topic_id,
+                                 (select avg(score)/10.0 from skill_scores k where k.session_id=s.id and k.source='llm')
+                                   as accuracy,
+                                 null::int as conf_before,
+                                 (select round(score)::int from skill_scores k where k.session_id=s.id
+                                   and k.source='self_report' limit 1) as conf_after
+                               from sessions s where s.student_id::text=%s and s.mode in ('coach','english','topic')
+                               order by s.started_at""", (sid,))
+    seen = {p["session_id"] for p in out["session_points"] if p["accuracy"] is not None}
+    out["session_points"] = sorted([p for p in out["session_points"] if p["session_id"] not in
+                                    {c["session_id"] for c in coach_pts}] +
+                                   [c for c in coach_pts if c["session_id"] not in seen],
+                                   key=lambda p: p["started_at"])
+    out["skills"] = [{k: v for k, v in s.items() if k != "last"} for s in learning_graph.skills(sid)]
+    out["self_confidence"] = learning_graph.confidence(sid)
+    out["next_steps"] = learning_graph.next_steps(sid)
+    return out
 
 
 @app.get("/students/{sid}/memory", dependencies=[Depends(verify_admin)])

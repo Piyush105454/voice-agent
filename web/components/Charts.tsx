@@ -27,7 +27,7 @@ export function ConfidenceAccuracyChart({ points, height = 180 }: { points: Sess
           <Tooltip contentStyle={tooltipStyle} formatter={(v: number, k) => [k === "confidence" ? `${v / 10}/10` : `${v}%`, k]} />
           <Legend wrapperStyle={{ fontSize: 11 }} />
           <Line type="monotone" dataKey="confidence" name="confidence (self-reported)" stroke="var(--accent)" strokeWidth={2} dot={{ r: 3 }} isAnimationActive />
-          <Line type="monotone" dataKey="accuracy" name="quiz accuracy" stroke="var(--m-high)" strokeWidth={2} dot={{ r: 3 }} isAnimationActive />
+          <Line type="monotone" dataKey="accuracy" name="measured (quiz or AI skill score)" stroke="var(--m-high)" strokeWidth={2} dot={{ r: 3 }} isAnimationActive />
         </LineChart>
       </ResponsiveContainer>
     </div>

@@ -12,7 +12,7 @@ import ProgressPanel from "@/components/ProgressPanel";
 import type { Feed, Mode, Overview } from "@/lib/types";
 
 const MODES: { id: Mode; icon: typeof Star; hint: string }[] = [
-  { id: "coach", icon: Sparkles, hint: "Tell Guru what you want to improve — any subject, exam, skill or goal. It remembers your journey." },
+  { id: "coach", icon: Sparkles, hint: "Talk about anything you want to improve: studies, career, work, skills or confidence. Guru remembers your journey." },
   { id: "maths", icon: Calculator, hint: "Maths drills: Guru finds why an answer is wrong and fixes it with hints." },
   { id: "english", icon: Languages, hint: "Speak freely; Guru gently fixes one mistake at a time." },
 ];
@@ -51,7 +51,9 @@ function Stat({ value, label }: { value: number; label: string }) {
   );
 }
 
-export default function SimpleView({ ov, feed, onActivity }: { ov: Overview; feed: Feed | null; onActivity: () => void }) {
+export default function SimpleView({ ov, feed, onActivity, journalTick = 0 }: {
+  ov: Overview; feed: Feed | null; onActivity: () => void; journalTick?: number;
+}) {
   const junior = (ov.grade ?? 8) <= 7;
   const [mode, setMode] = useState<Mode>("coach");
   const [tick, setTick] = useState(0); // refreshes progress after a call
@@ -171,8 +173,8 @@ export default function SimpleView({ ov, feed, onActivity }: { ov: Overview; fee
       </Stagger>
 
       <Reveal><GoalsPanel studentId={ov.id} goals={ov.goals ?? []} onChange={onActivity} /></Reveal>
-      <Reveal><JournalPanel studentId={ov.id} refreshKey={tick} /></Reveal>
-      <Reveal><ProgressPanel studentId={ov.id} refreshKey={tick} /></Reveal>
+      <Reveal><JournalPanel studentId={ov.id} refreshKey={tick + journalTick} /></Reveal>
+      <Reveal><ProgressPanel studentId={ov.id} refreshKey={tick + journalTick} /></Reveal>
 
       <Reveal>
         <section className="card p-6">

@@ -23,6 +23,7 @@ create table students (
   phone_e164 text,                       -- store encrypted at rest if possible
   language text default 'hi-en',         -- hi | en | hi-en
   grade int,
+  about text,                            -- ADDITIVE: who they are in their words (college student, working, job seeker…)
   is_minor boolean default true,
   call_window_start time default '09:00',
   call_window_end   time default '19:00',

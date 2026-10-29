@@ -119,6 +119,12 @@ def test_router_falls_back_to_sarvam_when_bolna_limit(monkeypatch):
     monkeypatch.setattr(voice_router.events, "emit", lambda *a, **k: None)
     monkeypatch.setattr(voice_router.bolna, "enabled", lambda: True)
     monkeypatch.setattr(voice_router.sarvam, "enabled", lambda: True)
+    # the session is made before dialling (its id + Guru's memory travel with the call)
+    import phone
+    monkeypatch.setattr(voice_router.db, "create_session", lambda *a, **k: {"id": "sess-1", "existing": False})
+    monkeypatch.setattr(voice_router.db, "run", lambda *a, **k: None)
+    monkeypatch.setattr(voice_router.db, "bind_call", lambda *a: None)
+    monkeypatch.setattr(phone, "call_variables", lambda sid, sess=None: {"student_id": sid, "session_id": sess})
     calls = []
     def out_of_credit(*a, **k):
         calls.append(1)

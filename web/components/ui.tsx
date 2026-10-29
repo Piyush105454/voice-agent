@@ -2,14 +2,16 @@
 import { Diamond, Inbox, TriangleAlert } from "lucide-react";
 import { masteryBand, pretty } from "@/lib/format";
 
-export function MasteryBar({ label, value, sub }: { label: string; value: number | null | undefined; sub?: string }) {
+export function MasteryBar({ label, value, sub, outOf10 }: {
+  label: string; value: number | null | undefined; sub?: string; outOf10?: boolean; // outOf10: show 0-10 (skills)
+}) {
   const band = masteryBand(value);
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-3 text-sm">
         <span className="truncate">{label}</span>
         <span className="num text-[13px] text-muted">
-          {value == null ? "—" : value.toFixed(2)} · <span style={{ color: band.color }}>{band.label}</span>
+          {value == null ? "—" : outOf10 ? `${(value * 10).toFixed(1)}/10` : value.toFixed(2)} · <span style={{ color: band.color }}>{band.label}</span>
         </span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-surface-2" role="meter" aria-label={label}
