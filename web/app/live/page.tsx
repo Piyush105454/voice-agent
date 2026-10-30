@@ -53,7 +53,7 @@ export default function LivePage() {
   const wantedRef = useRef(studentId);
   wantedRef.current = studentId;
 
-  const load = useCallback(async (sid: string, sessionId?: string) => {
+  const load = useCallback(async (sid: string, sessionId?: string, attempt = 0) => {
     try {
       const sess = sessionId ?? (await api<{ session: { id: string } | null }>(`live/current?student_id=${sid}`)).session?.id;
       const [f, g, o, p] = await Promise.all([
@@ -68,6 +68,9 @@ export default function LivePage() {
       setGraph(g);
       setOverview(o);
       setProgress(p);
+      if (!o && attempt < 3) {   // overview failed (network blip): retry rather than showing placeholder data forever
+        setTimeout(() => { if (sid === wantedRef.current) load(sid, sessionId, attempt + 1); }, 2500 * (attempt + 1));
+      }
     } catch {
       // Keep overview active
     } finally {

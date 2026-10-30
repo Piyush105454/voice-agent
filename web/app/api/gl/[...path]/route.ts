@@ -39,10 +39,15 @@ async function proxy(req: NextRequest, { params }: { params: { path: string[] } 
   };
   // raw bytes, not text: /web-call/turn uploads audio as multipart (the boundary is in content-type)
   if (!["GET", "HEAD"].includes(req.method)) init.body = await req.arrayBuffer();
-  let upstream: Response;
-  try {
-    upstream = await fetch(url, init);
-  } catch {
+  let upstream: Response | undefined;
+  for (let attempt = 0; attempt < 2 && !upstream; attempt++) {
+    try {
+      upstream = await fetch(url, init);
+    } catch {
+      if (!["GET", "HEAD"].includes(req.method)) break;   // never replay a POST/DELETE
+    }
+  }
+  if (!upstream) {
     return Response.json({ error: "API unreachable. Is the backend running on " + API + "?" }, { status: 502 });
   }
   const headers = new Headers({ "Content-Type": upstream.headers.get("content-type") || "application/json" });

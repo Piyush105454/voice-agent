@@ -16,4 +16,4 @@ WORKDIR /app/api
 EXPOSE 8000
 # one worker: in-process state (Bolna cooldown, browser-call sessions) lives in memory
 # $PORT is set by Railway / Render / Hugging Face; 8000 locally and in docker compose
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers --forwarded-allow-ips '*'"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --timeout-keep-alive 75 --proxy-headers --forwarded-allow-ips '*'"]

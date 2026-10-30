@@ -11,7 +11,8 @@ RUN npm ci
 COPY web/ ./
 # ipv4first: Next downloads the Google fonts at build time and some networks have broken IPv6
 ENV NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--dns-result-order=ipv4first API_INTERNAL_URL=http://127.0.0.1:8765
-RUN npm run build
+# the Google fonts download at build time can fail once in a while: retry instead of failing the deploy
+RUN npm run build || (sleep 5 && npm run build) || (sleep 20 && npm run build)
 
 # ---- 2. runtime: Python + the Node binary
 FROM python:3.13-slim

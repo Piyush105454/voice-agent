@@ -1,0 +1,12 @@
+import { chromium } from "playwright-core";
+const b = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe" });
+const page = await (await b.newContext({ viewport: { width: 1446, height: 900 } })).newPage();
+const t0 = Date.now(); const open = new Map();
+page.on("request", (r) => { if (r.url().includes("/api/gl/")) open.set(r, Date.now()); });
+page.on("requestfinished", async (r) => { if (open.has(r)) { const res = await r.response(); console.log(`${String(Date.now() - t0).padStart(6)}ms  ${res?.status()}  ${(Date.now() - open.get(r))}ms  ${r.url().replace(/^.*\/api\/gl\//, "").slice(0, 70)}`); open.delete(r); } });
+page.on("requestfailed", (r) => { if (open.has(r)) console.log(`FAILED ${r.url().replace(/^.*\/api\/gl\//, "").slice(0, 70)} ${r.failure()?.errorText}`); });
+await page.goto("http://localhost:10001/live?student=959275e6-cdcd-4e2b-b288-87ea872797e5", { waitUntil: "domcontentloaded", timeout: 90000 });
+await page.waitForTimeout(25000);
+console.log("still pending after 25s:", [...open.keys()].map((r) => r.url().replace(/^.*\/api\/gl\//, "").slice(0, 60)));
+console.log("header:", (await page.locator("h1").first().locator("xpath=..").innerText().catch(() => "?")).replace(/\s+/g, " ").slice(0, 80));
+await b.close();
