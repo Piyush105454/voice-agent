@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 60;   // Vercel: a slow remote database must not hit the 10 s default
 
 const API = process.env.API_INTERNAL_URL || "http://localhost:8000";
 // Browser-callable paths only (no Bolna webhooks, no admin graph rebuild).
