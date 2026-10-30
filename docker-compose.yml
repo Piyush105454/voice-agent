@@ -30,7 +30,7 @@ services:
       retries: 20
 
   api:
-    build: ./api
+    build: { context: ., dockerfile: api/Dockerfile }
     profiles: ["app"]
     env_file: .env
     environment:

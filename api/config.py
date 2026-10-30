@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     falkordb_host: str = "localhost"
     falkordb_port: int = 6379
     graph_name: str = "guruline"
+    falkordb_username: str = ""     # FalkorDB Cloud / any password-protected FalkorDB
+    falkordb_password: str = ""
 
     bolna_api_key: str = ""
     bolna_agent_id: str = ""
