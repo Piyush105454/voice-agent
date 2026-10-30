@@ -153,3 +153,15 @@ def test_misconception_update_rule():
 def test_bolna_trial_unverified_number_is_not_an_outage():
     e = bolna.classify(400, '{"message":"Trial accounts can only make calls to verified phone numbers."}')
     assert e.recipient and not e.limit
+
+
+def test_normalize_phone():
+    import pytest
+    import voice_router as vr
+    assert vr.normalize_phone("6261720559") == "+916261720559"
+    assert vr.normalize_phone("+91 62617-20559") == "+916261720559"
+    assert vr.normalize_phone("916261720559") == "+916261720559"
+    assert vr.normalize_phone("+14155550123") == "+14155550123"
+    for bad in ("12345", "abc", "", "+91"):
+        with pytest.raises(vr.VoiceError):
+            vr.normalize_phone(bad)

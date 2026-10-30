@@ -116,7 +116,24 @@ def web_link(student_id: str) -> dict:
 # ---------------------------------------------------------------- start a call
 
 
-def start_call(student_id: str, provider: str | None = None) -> dict:
+def normalize_phone(raw: str) -> str:
+    """'6261720559' / '+91 62617 20559' / '916261720559' -> '+916261720559'. Anything else is refused."""
+    import re
+    s = re.sub(r"[\s\-().]", "", raw or "")
+    if s.startswith("+"):
+        num = s
+    elif len(s) == 10 and s.isdigit():
+        num = "+91" + s
+    elif len(s) == 12 and s.startswith("91") and s.isdigit():
+        num = "+" + s
+    else:
+        raise VoiceError(422, "enter a 10-digit mobile number, or a full number like +919876543210")
+    if not (num[1:].isdigit() and 8 <= len(num) - 1 <= 15):
+        raise VoiceError(422, "that does not look like a valid phone number")
+    return num
+
+
+def start_call(student_id: str, provider: str | None = None, phone: str | None = None) -> dict:
     st = db.student(student_id)
     if not st:
         raise VoiceError(404, "unknown student")
@@ -124,14 +141,15 @@ def start_call(student_id: str, provider: str | None = None) -> dict:
         raise VoiceError(403, "no guardian consent on file")
     mode = provider or settings.voice_provider
     tried: list[str] = []
+    to = normalize_phone(phone) if phone and phone.strip() else st["phone_e164"]   # typed number wins for this call
 
-    if mode in ("auto", "bolna") and bolna.enabled() and st["phone_e164"]:
+    if mode in ("auto", "bolna") and bolna.enabled() and to:
         if mode == "bolna" or not bolna_blocked():
             # the session exists before dialling: its id, Guru's opening line and memory travel with the call
             sess = db.create_session(student_id, None, "phone", None, "open")
             try:
                 import phone
-                out = bolna.trigger_call(st["phone_e164"], student_id, phone.call_variables(student_id, sess["id"]),
+                out = bolna.trigger_call(to, student_id, phone.call_variables(student_id, sess["id"]),
                                          st.get("language") if db.language_known(student_id) else None)
                 if out.get("execution_id"):
                     db.bind_call(sess["id"], str(out["execution_id"]))

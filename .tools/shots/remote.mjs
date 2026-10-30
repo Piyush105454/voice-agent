@@ -1,0 +1,15 @@
+import { chromium } from "playwright-core";
+import fs from "node:fs";
+const OUT = new URL("./out/", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
+fs.mkdirSync(OUT, { recursive: true });
+const b = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe" });
+const page = await (await b.newContext({ viewport: { width: 1446, height: 900 } })).newPage();
+const errs = []; page.on("pageerror", (e) => errs.push(e.message));
+await page.goto("http://localhost:10001/", { waitUntil: "networkidle", timeout: 90000 });
+await page.waitForTimeout(2500);
+await page.screenshot({ path: `${OUT}remote-landing.png` });
+await page.goto("http://localhost:10001/live?student=959275e6-cdcd-4e2b-b288-87ea872797e5", { waitUntil: "networkidle", timeout: 90000 });
+await page.waitForTimeout(5000);
+await page.screenshot({ path: `${OUT}remote-live.png` });
+console.log("graph nodes drawn on a canvas:", await page.locator('[aria-label="Knowledge graph"] canvas').count(), "| errors:", errs.length ? errs : "none");
+await b.close();

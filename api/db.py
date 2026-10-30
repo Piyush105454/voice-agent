@@ -645,7 +645,19 @@ def skill_series(student_id: str, period: str) -> list[dict]:
 # ---------------------------------------------------------------- dashboard page payloads
 
 
+def close_stale_sessions() -> int:
+    """Sessions still "active" long after they could have ended (phone calls are capped at 10 minutes by Bolna; browser
+    calls get an hour and a half) are closed: their end webhook never arrived, e.g. an unanswered call."""
+    return run("""update sessions set status='ended',
+                         ended_at = least(now(), started_at + case when channel='phone' then interval '20 minutes'
+                                                                   else interval '90 minutes' end)
+                  where ended_at is null
+                    and started_at < now() - case when channel='phone' then interval '20 minutes'
+                                                  else interval '90 minutes' end""")
+
+
 def latest_session(student_id: str | None = None) -> dict | None:
+    close_stale_sessions()      # otherwise an old never-closed call is shown instead of the latest real one
     return one("""select s.id::text, s.student_id::text, s.status, s.channel, s.started_at, st.first_name
                   from sessions s join students st on st.id=s.student_id
                   where (%s::text is null or s.student_id::text=%s)

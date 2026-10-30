@@ -7,10 +7,9 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const LINKS = [
-  { href: "/live", label: "Practise" },
-  { href: "/teacher", label: "Teacher" },
-  { href: "/proof", label: "Proof" },
-  { href: "/privacy", label: "Privacy" },
+  { href: "/", label: "Home" },
+  { href: "/live", label: "Operator Console" },
+  { href: "/privacy", label: "Privacy & Audit" },
 ];
 
 function ThemeToggle() {
@@ -39,7 +38,7 @@ export default function Nav() {
   const path = usePathname();
   const [hover, setHover] = useState<string | null>(null);
   if (path.startsWith("/parent")) return null; // parent view stays minimal
-  const active = LINKS.find((l) => path.startsWith(l.href))?.href ?? null;
+  const active = LINKS.find((l) => (l.href === "/" ? path === "/" : path.startsWith(l.href)))?.href ?? null;
   const pill = hover ?? active;
 
   return (
@@ -52,7 +51,7 @@ export default function Nav() {
             <span className="absolute inset-0 animate-ping rounded-full bg-accent/60" aria-hidden />
             <span className="relative inline-block h-2.5 w-2.5 rounded-full bg-accent" aria-hidden />
           </span>
-          Guru <span className="italic text-accent">Line</span>
+          Guru<span className="italic text-accent">ji</span>
         </Link>
         <div className="hidden items-center md:flex" onMouseLeave={() => setHover(null)}>
           {LINKS.map((l) => (
@@ -68,9 +67,6 @@ export default function Nav() {
           ))}
         </div>
         <ThemeToggle />
-        <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
-          <Link href="/start" className="btn-primary h-11 px-5">Start practising</Link>
-        </motion.div>
       </motion.nav>
     </header>
   );

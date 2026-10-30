@@ -130,7 +130,9 @@ export type Overview = {
   id: string;
   first_name: string;
   language: string;
-  grade: number;
+  grade: number | null;
+  about?: string | null;
+  phone_e164?: string | null;
   consented: boolean;
   topics: TopicMastery[];
   misconceptions: MisconceptionRow[];

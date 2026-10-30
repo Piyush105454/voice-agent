@@ -10,8 +10,8 @@ const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", displ
 const deva = Noto_Sans_Devanagari({ subsets: ["devanagari"], weight: ["400", "500"], variable: "--font-deva", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Guru Line · A tutor on a normal phone call",
-  description: "A phone-call AI tutor that remembers every misconception a student has, and proves they improved.",
+  title: "Guruji · Voice-Based Career Guidance for Rural Students",
+  description: "Guruji — Voice-Based Career Guidance for Rural Students. Discover verified ITI, Polytechnic, Nursing, Skill India courses, and scholarships in Hindi, Hinglish, or English.",
 };
 
 // Applies the saved theme before first paint (no light->dark flash). Light is the default.

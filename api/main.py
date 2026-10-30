@@ -43,6 +43,10 @@ def _warm_llm_schemas() -> None:
 
     def recover():
         try:
+            db.close_stale_sessions()
+        except Exception as e:
+            logging.getLogger("bolna").warning("stale session cleanup skipped: %s", e)
+        try:
             import learning_graph
             for r in db.all_rows("select distinct student_id::text as id from session_reviews"):
                 learning_graph.sync_safely(r["id"])
@@ -95,8 +99,15 @@ def verify_admin(x_admin_key: str = Header(default="")):
 # ---------------------------------------------------------------- health
 
 
+@app.get("/", include_in_schema=False)
+def root():
+    return {"service": "Guru Line API", "health": "/health", "docs": "/docs"}
+
+
 @app.get("/health")
 def health():
+    from urllib.parse import urlparse
+    host = urlparse(settings.database_url).hostname or "?"
     checks: dict[str, str] = {}
     for name, fn in (("postgres", db.ping), ("falkordb", graph.ping)):
         try:
@@ -106,8 +117,12 @@ def health():
             checks[name] = f"error: {type(e).__name__}: {e}"[:200]
     ok = all(v == "ok" for v in checks.values())
     voice = voice_router.status()
-    return JSONResponse({"ok": ok, **checks, "voice": {"active": voice["active"], "mode": voice["mode"]}},
-                        status_code=200 if ok else 503)
+    body = {"ok": ok, **checks, "database_host": host, "voice": {"active": voice["active"], "mode": voice["mode"]}}
+    if host in ("localhost", "127.0.0.1"):
+        body["hint"] = ("DATABASE_URL is not reaching this service: it is using the built-in localhost default. "
+                        "Set DATABASE_URL on THIS service and redeploy.")
+    # Postgres is the source of truth; the graph is a derived index, so a missing graph must not take the service down
+    return JSONResponse(body, status_code=200 if checks["postgres"] == "ok" else 503)
 
 
 # ---------------------------------------------------------------- Bolna tools (agent.md §4.3)
@@ -293,12 +308,14 @@ async def missed_call(request: Request, key: str = "", From: str = "", phone: st
 class CallIn(BaseModel):
     student_id: str
     provider: str | None = None   # auto | bolna | sarvam (override)
+    phone: str | None = None      # dial this number instead of the one saved on the profile (e.g. a verified test number)
+    name: str | None = None       # accepted for the console; the greeting always uses the profile's name
 
 
 @app.post("/voice/call", dependencies=[Depends(verify_admin)])
 def voice_call(b: CallIn):
     """Start a tutoring call: Bolna phone call, or a Sarvam web-call link if Bolna is out of credit."""
-    return voice_router.start_call(b.student_id, b.provider)
+    return voice_router.start_call(b.student_id, b.provider, b.phone)
 
 
 @app.get("/voice/status", dependencies=[Depends(verify_admin)])

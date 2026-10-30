@@ -19,6 +19,31 @@ type Props = {
   interactive?: boolean;
 };
 
+/** Keeps each node + its label (a wide, flat box) clear of the others, so labels do not print on top of each other. */
+function spreadForce(w = 112, h = 32) {
+  let nodes: any[] = [];
+  const force = (alpha: number) => {
+    const k = 0.4 * Math.max(alpha, 0.15);
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        const dx = (b.x ?? 0) - (a.x ?? 0), dy = (b.y ?? 0) - (a.y ?? 0);
+        const ox = w - Math.abs(dx), oy = h - Math.abs(dy);
+        if (ox <= 0 || oy <= 0) continue;
+        if (oy <= ox) {                                   // overlap is shallower vertically: move them apart in y
+          const s = (dy === 0 ? (i % 2 ? 1 : -1) : Math.sign(dy)) * oy * k;
+          a.vy -= s; b.vy += s;
+        } else {
+          const s = (dx === 0 ? (i % 2 ? 1 : -1) : Math.sign(dx)) * ox * k;
+          a.vx -= s; b.vx += s;
+        }
+      }
+    }
+  };
+  force.initialize = (n: any[]) => { nodes = n; };
+  return force;
+}
+
 export default function KnowledgeGraph({ data, active = {}, height = 480, showAllLabels = true, interactive = true }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const fg = useRef<any>(null);
@@ -58,8 +83,11 @@ export default function KnowledgeGraph({ data, active = {}, height = 480, showAl
   const configure = () => {
     const g = fg.current;
     if (!g || configured.current) return;
-    g.d3Force("charge")?.strength(-340);
-    g.d3Force("link")?.distance((l: any) => (l.kind === "PREREQUISITE_OF" ? 95 : 70));
+    const charge = g.d3Force("charge");
+    charge?.strength(-320);
+    charge?.distanceMax?.(240);   // far-away nodes stop repelling each other, so nothing drifts off and shrinks the fit
+    g.d3Force("link")?.distance((l: any) => (l.kind === "PREREQUISITE_OF" ? 95 : l.kind === "HAS_GOAL" ? 110 : 78));
+    g.d3Force("spread", spreadForce());
     configured.current = true;
     g.d3ReheatSimulation();
   };
@@ -67,6 +95,10 @@ export default function KnowledgeGraph({ data, active = {}, height = 480, showAl
   useEffect(() => {
     fg.current?.d3ReheatSimulation?.();
   }, [graph]);
+  useEffect(() => {
+    const t = setTimeout(() => fg.current?.zoomToFit?.(300, 50), 350);   // window resized / layout settled: refit
+    return () => clearTimeout(t);
+  }, [width]);
 
   const colors = useMemo(
     () => ({ accent: css("--accent"), misc: css("--misc"), line: css("--line"), text: css("--text"), muted: css("--muted") }),
@@ -206,6 +238,7 @@ export default function KnowledgeGraph({ data, active = {}, height = 480, showAl
           enableZoomInteraction={interactive}
           enablePanInteraction={interactive}
           enableNodeDrag={interactive}
+          minZoom={0.45}
           nodeRelSize={6}
           nodeCanvasObject={draw as any}
           nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
@@ -221,8 +254,9 @@ export default function KnowledgeGraph({ data, active = {}, height = 480, showAl
           linkDirectionalArrowLength={(l: any) => (l.kind === "PREREQUISITE_OF" || l.kind === "NEXT_STEP" || l.kind === "WEAKENS" ? 4 : 0)}
           linkDirectionalArrowRelPos={0.9}
           onEngineStop={() => {
-            if (fittedFor.current !== nodeKey) {
-              fittedFor.current = nodeKey;
+            const key = `${nodeKey}|${Math.round(width / 40)}`;
+            if (fittedFor.current !== key) {
+              fittedFor.current = key;
               fg.current?.zoomToFit?.(500, 50);
             }
           }}
@@ -241,20 +275,11 @@ export function GraphLegend() {
   );
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-      {item(<span className="h-2.5 w-2.5 rounded-full border-2 border-text" />, "Student")}
-      {item(<span className="h-2.5 w-2.5 rounded-full bg-m-low" />, "Topic / skill: needs practice")}
-      {item(<span className="h-2.5 w-2.5 rounded-full bg-m-mid" />, "Building")}
-      {item(<span className="h-2.5 w-2.5 rounded-full bg-m-high" />, "Strong")}
-      {item(<span className="h-2.5 w-2.5 rotate-45 bg-misc" />, "Misconception")}
-      {item(<span className="w-4 border-t border-dashed border-muted" />, "Prerequisite")}
-      {item(<span className="text-[11px] leading-none text-accent">★</span>, "Goal")}
-      {item(<span className="h-2.5 w-2.5 rounded-full border border-text bg-m-low" />, "Problem: new / improving / solved")}
-      {item(<span className="h-2.5 w-2.5 rounded-full border border-dashed border-accent" />, "Next step")}
-      {item(<span className="h-2.5 w-2.5 rounded-full border-2 border-sky" />, "Confidence (self-reported)")}
-      {item(<span className="h-2.5 w-2.5 rounded-full" style={{ background: "var(--m-high)", opacity: 0.55 }} />, "Practised")}
-      {item(<span className="h-2.5 w-2.5 rotate-45" style={{ background: "var(--misc)", opacity: 0.75 }} />, "Mistake pattern")}
-      {item(<span className="h-2.5 w-2.5" style={{ background: "var(--m-high)", opacity: 0.8 }} />, "Works for them")}
-      {item(<span className="h-2.5 w-2.5" style={{ background: "var(--sky)", opacity: 0.8 }} />, "Book / method")}
+      {item(<span className="h-2.5 w-2.5 rounded-full border-2 border-text" />, "Caller (Student)")}
+      {item(<span className="h-2.5 w-2.5 rounded-full bg-m-high" />, "Matched Career / Interest")}
+      {item(<span className="h-2.5 w-2.5 rounded-full bg-m-mid" />, "Exploring Topic")}
+      {item(<span className="h-2.5 w-2.5 rotate-45 bg-misc" />, "Constraint / Doubt")}
+      {item(<span className="text-[11px] leading-none text-accent">★</span>, "Qualification / Scholarship / Action")}
     </div>
   );
 }

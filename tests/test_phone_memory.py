@@ -104,3 +104,20 @@ def test_new_student_phone_opening_asks_language():
     line = coach.opening_line({**db.student(sid), "id": sid})
     assert line.startswith("Namaste Zoya!") and "milkar" in line and "Hindi, English, ya dono ka mix" in line
     assert coach.spoken_name("rahul ai") == "Rahul" and coach.opening_line({"id": sid, "first_name": ""}) == coach.UNKNOWN_CALLER
+
+
+def test_stale_active_session_does_not_pin_the_live_console():
+    """An unanswered call whose end webhook never came stays 'active'. The live console must show the latest real call."""
+    sid = db.one("select id::text from students where first_name='Rahul'")["id"]
+    old = db.create_session(sid, None, "phone", None, "open")
+    db.run("update sessions set started_at = now() - interval '3 hours' where id::text=%s", (old["id"],))
+    real = db.create_session(sid, "exec-live-ok", "phone", None, "coach")
+    db.run("update sessions set started_at = now() - interval '2 hours', ended_at = now() - interval '110 minutes', "
+           "status='ended' where id::text=%s", (real["id"],))
+    shown = db.latest_session(sid)
+    assert shown["id"] != old["id"]                                    # not the 3-hour-old 'active' ghost
+    assert db.get_session(old["id"])["ended_at"] is not None           # the ghost was closed
+    assert db.get_session(old["id"])["status"] == "ended"
+    fresh = db.create_session(sid, None, "phone", None, "open")        # a call that is really in progress stays live
+    assert db.latest_session(sid)["id"] == fresh["id"]
+    db.close_session(fresh["id"], "ended")

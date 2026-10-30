@@ -9,15 +9,13 @@ import { useEffect, useRef, useState } from "react";
 
 type Line = { who: "guru" | "student"; text: string };
 const SCRIPT: { at: number; line?: Line; card?: "mis" | "fixed" | "parent" | "recall" }[] = [
-  { at: 3.2, line: { who: "guru", text: "Namaste Rahul! x + 5 = 12, x kya hoga?" } },
-  { at: 6.2, line: { who: "student", text: "17?" } },
-  { at: 7.0, card: "mis" },
-  { at: 8.4, line: { who: "guru", text: "Chalo check karte hain. +5 ko dusri taraf le jaayein toh kya banega?" } },
-  { at: 12.0, line: { who: "student", text: "Minus 5… toh 7!" } },
-  { at: 12.8, card: "fixed" },
-  { at: 14.0, line: { who: "guru", text: "Shabaash! Tumne inverse use kiya. Kal ise dobara try karenge." } },
-  { at: 16.6, card: "parent" },
-  { at: 17.6, card: "recall" },
+  { at: 3.0, line: { who: "guru", text: "Hello Rahul! Tell me your qualification and what kind of work interests you." } },
+  { at: 7.0, line: { who: "student", text: "I want a low-fee government course in electrical or solar technology." } },
+  { at: 8.0, card: "mis" },
+  { at: 10.5, line: { who: "guru", text: "Searching official portals live — Government ITI & PMKVY Solar Technician match your goal, plus NSP Scholarship." } },
+  { at: 12.0, card: "fixed" },
+  { at: 14.5, card: "parent" },
+  { at: 16.5, card: "recall" },
 ];
 const LOOP = 21;   // seconds
 const ANSWER_AT = 2.4;
@@ -114,8 +112,8 @@ export default function HeroCall() {
                     <div className="text-xs uppercase tracking-[0.2em] text-muted">Incoming call</div>
                     <motion.div className="mx-auto mt-6 grid h-20 w-20 place-items-center rounded-full bg-gradient-to-br from-accent to-[#c2410c] font-serif text-3xl text-black"
                       animate={{ scale: [1, 1.06, 1] }} transition={{ duration: 1.2, repeat: Infinity }}>G</motion.div>
-                    <div className="mt-4 font-serif text-2xl">Guru</div>
-                    <div className="text-sm text-muted">AI tutor · Maths</div>
+                    <div className="mt-4 font-serif text-2xl">Guruji</div>
+                    <div className="text-sm text-muted">Career Guidance on a Phone Call</div>
                   </div>
                   <div className="flex w-full justify-between px-4">
                     <div className="grid h-14 w-14 place-items-center rounded-full bg-m-low/90"><PhoneOff size={22} /></div>
@@ -131,14 +129,14 @@ export default function HeroCall() {
                     <div className="flex items-center gap-2">
                       <div className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-accent to-[#c2410c] font-serif text-black">G</div>
                       <div>
-                        <div className="text-sm leading-tight">Guru</div>
+                        <div className="text-sm leading-tight">Guruji</div>
                         <div className="num text-[11px] text-m-high">● {String(Math.floor(secs / 60)).padStart(2, "0")}:{String(secs % 60).padStart(2, "0")}</div>
                       </div>
                     </div>
-                    <span className="rounded-full border border-line px-2 py-0.5 text-[10px] text-muted">Hinglish</span>
+                    <span className="rounded-full border border-line px-2 py-0.5 text-[10px] text-muted">Hindi · EN</span>
                   </div>
                   <div className="mt-4"><Waveform who={speaking} active={!!speaking} /></div>
-                  <div className="mt-1 text-center text-[11px] text-muted">{speaking === "student" ? "Rahul is speaking" : speaking ? "Guru is speaking" : "Listening…"}</div>
+                  <div className="mt-1 text-center text-[11px] text-muted">{speaking === "student" ? "Student is speaking" : speaking ? "Guruji is speaking" : "Listening…"}</div>
                   <div ref={box} className="mt-3 flex-1 space-y-2.5 overflow-hidden">
                     <AnimatePresence initial={false}>
                       {lines.map((l, i) => (
@@ -164,20 +162,20 @@ export default function HeroCall() {
 
         {/* moments, floating around the phone */}
         <FloatCard show={cards.has("mis")} className="left-0 top-[18%] sm:-left-6">
-          <div className="flex items-center gap-2 text-misc"><AlertTriangle size={15} /> <span className="font-medium">Misconception found</span></div>
-          <div className="mt-0.5 text-xs text-muted">Adds instead of using the inverse</div>
+          <div className="flex items-center gap-2 text-misc"><AlertTriangle size={15} /> <span className="font-medium">Caller Memory</span></div>
+          <div className="mt-0.5 text-xs text-muted">Any Qualification · Electrical & Solar</div>
         </FloatCard>
         <FloatCard show={cards.has("fixed")} className="right-0 top-[40%] sm:-right-8">
-          <div className="flex items-center gap-2 text-m-high"><Check size={15} /> <span className="font-medium">Fixed with one hint</span></div>
-          <div className="num mt-0.5 text-xs text-muted">Mastery 30% → <span className="text-m-high">62%</span></div>
+          <div className="flex items-center gap-2 text-m-high"><Check size={15} /> <span className="font-medium">Live Govt Search</span></div>
+          <div className="num mt-0.5 text-xs text-muted">ncs.gov.in · dgt.gov.in · Verified</div>
         </FloatCard>
         <FloatCard show={cards.has("parent")} className="bottom-[16%] left-0 sm:-left-10">
-          <div className="flex items-center gap-2"><BellRing size={15} className="text-accent" /> <span className="font-medium">Parent update sent</span></div>
-          <div className="mt-0.5 font-deva text-xs text-muted">आज राहुल ने समीकरण हल किए…</div>
+          <div className="flex items-center gap-2"><BellRing size={15} className="text-accent" /> <span className="font-medium">Next Steps</span></div>
+          <div className="mt-0.5 text-xs text-muted">Eligibility · Portal · Local CSC</div>
         </FloatCard>
         <FloatCard show={cards.has("recall")} className="bottom-[4%] right-0 sm:-right-4">
-          <div className="flex items-center gap-2"><CalendarClock size={15} className="text-accent" /> <span className="font-medium">Tomorrow, 5:00 pm</span></div>
-          <div className="mt-0.5 text-xs text-muted">5-min recall call on this mistake</div>
+          <div className="flex items-center gap-2"><CalendarClock size={15} className="text-accent" /> <span className="font-medium">Memory Graph</span></div>
+          <div className="mt-0.5 text-xs text-muted">Saved for next phone call</div>
         </FloatCard>
       </motion.div>
     </div>

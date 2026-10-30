@@ -34,3 +34,7 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 *.log
+
+# Call transcripts / student ids dumped while debugging: never commit
+.tools/exec_dump*.txt
+.tools/asha.txt
