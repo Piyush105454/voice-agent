@@ -5,4 +5,4 @@
 
 [![View Guruji Presentation](guruji-preview.png)](https://voice-agent-nu-drab.vercel.app/)
 
-*Click the preview to open the full project presentation.*
+*Click the preview to open the website preview.*
