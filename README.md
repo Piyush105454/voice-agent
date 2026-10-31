@@ -1,5 +1,5 @@
 
-## 📄 Meet Guruji
+## 📄 [Meet Guruji — View Project Presentation](docs/Guruji-Presentation.pdf)
 
 **A Career Mentor That Calls, Listens & Remembers.**
 
