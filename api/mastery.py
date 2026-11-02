@@ -1,4 +1,4 @@
-"""Bayesian Knowledge Tracing + forgetting (agent.md §5.3)."""
+"""Bayesian Knowledge Tracing + forgetting (agent.md §5.3). hii"""
 from __future__ import annotations
 
 import math
