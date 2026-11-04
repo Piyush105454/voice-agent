@@ -165,7 +165,7 @@ def start_call(student_id: str, provider: str | None = None, phone: str | None =
                 else:
                     block_bolna("limit_reached" if e.limit else "unavailable", e.message,
                                 settings.bolna_cooldown_minutes if e.limit else NETWORK_COOLDOWN_MIN)
-                tried.append(f"bolna: {'limit reached' if e.limit else 'cannot call this number' if e.recipient else 'unavailable'}"
+                tried.append(f"bolna: {'limit reached' if e.limit else 'call rejected by Bolna' if e.recipient else 'unavailable'}"
                              f" ({e.status}): {_reason(e.message)}")
         else:
             until = _state["bolna_blocked_until"].astimezone().strftime("%H:%M")

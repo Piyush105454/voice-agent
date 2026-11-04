@@ -25,7 +25,10 @@ def enabled() -> bool:
     return bool(settings.bolna_api_key and settings.bolna_agent_id)
 
 
-_RECIPIENT_RX = re.compile(r"verified|recipient|invalid.{0,20}(phone|number)|not a valid (phone|number)", re.I)
+# Problems with THIS request (an unverified number on a trial account, or a caller number that is not owned by the
+# Bolna telephony provider) are not a capacity problem: report them, but never bench Bolna for everyone.
+_RECIPIENT_RX = re.compile(r"verified|recipient|invalid.{0,20}(phone|number)|not a valid (phone|number)"
+                           r"|from[_ ]?number|telephony provider", re.I)
 
 
 def classify(status: int | None, body: str) -> BolnaError:

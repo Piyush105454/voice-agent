@@ -211,3 +211,91 @@ def nodes_for(student_id: str) -> tuple[list[dict], list[dict]]:
                                 {"sid": student_id}):
         links.append({"source": a, "target": b, "kind": rel})
     return nodes, links
+
+
+def graph_from_postgres(student_id: str, limit: int = 80) -> dict:
+    """The same graph the dashboard draws from FalkorDB, built straight from Postgres.
+
+    Postgres is the source of truth and FalkorDB only a derived index, so when the graph database is not reachable
+    (a free hosting plan, a restart) the console still shows the student's real graph instead of an empty box.
+    Node kinds, ids and link kinds match the FalkorDB version (see graph.neighbourhood, sync and nodes_for)."""
+    st = db.student(student_id)
+    if not st:
+        return {"nodes": [], "links": []}
+    sid = student_id
+    nodes: dict[str, dict] = {sid: {"id": sid, "label": st["first_name"], "kind": "student"}}
+    links: list[dict] = []
+    tnames, mnames = db.topic_names(), db.misconception_names()
+
+    def topic(tid: str, mastery: float | None = None, stability: float | None = None) -> None:
+        if tid not in nodes:
+            nodes[tid] = {"id": tid, "label": tnames.get(tid, tid), "kind": "topic", "mastery": mastery,
+                          **({"stability": stability} if stability is not None else {})}
+
+    # --- maths knowledge: mastery per topic, held misconceptions, strategies that work
+    for r in db.all_rows("select topic_id, p_known, stability_days from mastery where student_id::text=%s", (sid,)):
+        topic(r["topic_id"], round(float(r["p_known"]), 3), float(r["stability_days"] or 3))
+        links.append({"source": sid, "target": r["topic_id"], "kind": "MASTERY", "value": round(float(r["p_known"]), 3)})
+    for r in db.all_rows("""select sm.misconception_id as id, sm.strength, sm.evidence_n as n, mt.topic_id
+                            from student_misconceptions sm join misconception_types mt on mt.id=sm.misconception_id
+                            where sm.student_id::text=%s""", (sid,)):
+        nodes[r["id"]] = {"id": r["id"], "label": mnames.get(r["id"], r["id"]), "kind": "misconception",
+                          "strength": round(float(r["strength"]), 3), "n": int(r["n"] or 0)}
+        links.append({"source": sid, "target": r["id"], "kind": "HOLDS", "value": round(float(r["strength"]), 3)})
+        if r["topic_id"]:
+            topic(r["topic_id"])
+            links.append({"source": r["id"], "target": r["topic_id"], "kind": "AFFECTS"})
+    for r in db.all_rows("""select content->>'id' as id, count(*)::int as n from memory_facts
+                            where student_id::text=%s and kind='strategy' and superseded_by is null
+                              and content->>'id' is not null group by 1""", (sid,)):
+        nodes[r["id"]] = {"id": r["id"], "label": r["id"].replace("_", " "), "kind": "strategy", "n": r["n"]}
+        links.append({"source": sid, "target": r["id"], "kind": "RESPONDS_WELL_TO"})
+    for r in db.all_rows("select prereq_id, topic_id from topic_prereqs"):
+        if r["prereq_id"] in nodes or r["topic_id"] in nodes:
+            topic(r["prereq_id"])
+            topic(r["topic_id"])
+            links.append({"source": r["prereq_id"], "target": r["topic_id"], "kind": "PREREQUISITE_OF"})
+
+    # --- coaching state: goals, skills, Guru's notes, confidence
+    prof = db.learner_profile(sid) or {}
+    goals = [g for g in db.list_goals(sid) if g["status"] == "active"]
+    for g in goals:
+        nodes[g["id"]] = {"id": g["id"], "label": _short(g["aim"], 40), "kind": "goal", "detail": g["aim"]}
+        links.append({"source": sid, "target": g["id"], "kind": "HAS_GOAL"})
+    anchor = goals[0]["id"] if goals else sid
+
+    def coach(nid: str, kind: str, label: str, rel: str, src: str = sid, value: float | None = None,
+              detail: str | None = None) -> None:
+        nodes[nid] = {"id": nid, "label": label, "kind": kind, "value": value, "detail": detail or label}
+        links.append({"source": src, "target": nid, "kind": rel})
+
+    for i, t in enumerate((prof.get("next_topics") or [])[:3]):
+        coach(f"nx:{sid}:{i}", "next", _short(t), "NEXT_STEP", anchor, float(i + 1), t)
+    for i, t in enumerate((prof.get("topics_covered") or [])[:8]):
+        coach(f"pr:{sid}:{i}", "practice", _short(t), "PRACTISED", detail=t)
+    sk = skills(sid)
+    for s in sk:
+        nodes[s["skill"]] = {"id": s["skill"], "label": s["label"], "kind": "skill", "score": float(s["score"]),
+                             "trend": float(s["trend"])}
+        links.append({"source": sid, "target": s["skill"], "kind": "SKILL", "value": float(s["score"]) / 10})
+    weakest = next((s["skill"] for s in sk if not s["skill"].endswith(".confidence")), None)
+    for i, m in enumerate((prof.get("recurring_mistakes") or [])[:3]):
+        coach(f"pat:{sid}:{i}", "pattern", _short(m), "HAS_PATTERN", detail=m)
+        if weakest:
+            links.append({"source": f"pat:{sid}:{i}", "target": weakest, "kind": "WEAKENS"})
+    for i, c in enumerate((prof.get("challenges") or [])[:4]):
+        problem, value = challenge_status(c)
+        coach(f"ch:{sid}:{i}", "challenge", _short(problem), "FACES", value=value, detail=c)
+    for i, w in enumerate((prof.get("what_works") or [])[:3]):
+        coach(f"ww:{sid}:{i}", "works", _short(w), "RESPONDS_WELL_TO", detail=w)
+    for i, r in enumerate(db.recent_resources(sid, 4)):
+        coach(f"res:{sid}:{i}", "resource", _short(r["title"]), "SUGGESTED", detail=f"{r['title']}"
+              + (f" by {r['by']}" if r.get("by") else "") + (f": {r['why']}" if r.get("why") else ""))
+    c = confidence(sid)
+    if c:
+        coach(f"conf:{sid}", "confidence", f"Confidence {c['value']}/10", "FEELS", value=float(c["value"]),
+              detail=f"Self-reported {c['value']}/10 over {c['n']} answer(s); change {c['trend']:+g}")
+
+    keep = list(nodes.values())[:limit]
+    ids = {n["id"] for n in keep}
+    return {"nodes": keep, "links": [l for l in links if l["source"] in ids and l["target"] in ids]}

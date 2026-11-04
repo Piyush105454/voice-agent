@@ -451,17 +451,21 @@ def student_detail(sid: str):
 @app.get("/students/{sid}/graph", dependencies=[Depends(verify_admin)])
 def student_graph(sid: str):
     import learning_graph
-    g = graph.neighbourhood(sid, 80)
-    if not g["nodes"]:
-        return g
     try:
-        nodes, links = learning_graph.nodes_for(sid)
-    except Exception:
-        nodes, links = [], []
-    have = {n["id"] for n in g["nodes"]}
-    g["nodes"] += [n for n in nodes if n["id"] not in have]
-    g["links"] += links
-    return g
+        g = graph.neighbourhood(sid, 80)
+        if g["nodes"]:
+            try:
+                nodes, links = learning_graph.nodes_for(sid)
+            except Exception:
+                nodes, links = [], []
+            have = {n["id"] for n in g["nodes"]}
+            g["nodes"] += [n for n in nodes if n["id"] not in have]
+            g["links"] += links
+            return g
+    except Exception as e:      # FalkorDB unreachable (free hosting, restart): fall through to Postgres
+        logging.getLogger("graph").info("graph database unavailable (%s), building the graph from Postgres", type(e).__name__)
+    # Postgres is the source of truth; the same graph can be built from it, so the console never shows an empty box
+    return learning_graph.graph_from_postgres(sid)
 
 
 @app.get("/students/{sid}/progress", dependencies=[Depends(verify_admin)])

@@ -165,3 +165,10 @@ def test_normalize_phone():
     for bad in ("12345", "abc", "", "+91"):
         with pytest.raises(vr.VoiceError):
             vr.normalize_phone(bad)
+
+
+def test_wrong_caller_number_is_not_a_bolna_outage():
+    """BOLNA_FROM_NUMBER pointing at a number the account does not own is a setup mistake: report it, do not bench Bolna."""
+    e = bolna.classify(400, "Calling from_number +919999999999 doesn't exist for plivo. Please check your agent telephony provider.")
+    assert e.recipient and not e.limit
+    assert bolna.classify(402, "insufficient balance").limit            # a real limit still benches
