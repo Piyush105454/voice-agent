@@ -21,7 +21,13 @@ def pool() -> ConnectionPool:
             settings.database_url,
             min_size=1,
             max_size=10,
-            kwargs={"row_factory": dict_row, "autocommit": True},
+            # Neon / pgbouncer close idle SSL connections: check one before handing it out and drop old ones,
+            # otherwise the first request after a quiet period fails with "SSL connection has been closed".
+            check=ConnectionPool.check_connection,
+            max_idle=60,
+            max_lifetime=600,
+            kwargs={"row_factory": dict_row, "autocommit": True,
+                    "keepalives": 1, "keepalives_idle": 30, "keepalives_interval": 10, "keepalives_count": 3},
             open=True,
         )
     return _pool

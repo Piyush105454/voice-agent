@@ -13,7 +13,7 @@ const nextConfig = {
   poweredByHeader: false,
   // One public URL serves the dashboard AND the API's public endpoints (all-in-one deployment).
   async rewrites() {
-    const api = process.env.API_INTERNAL_URL || "http://127.0.0.1:8000";
+    const api = (process.env.API_INTERNAL_URL || "http://127.0.0.1:8000").trim().replace(/\/+$/, "");
     return [
       { source: "/bolna/:path*", destination: `${api}/bolna/:path*` },
       { source: "/missed_call", destination: `${api}/missed_call` },

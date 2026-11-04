@@ -5,7 +5,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 60;   // Vercel: a slow remote database must not hit the 10 s default
 
-const API = process.env.API_INTERNAL_URL || "http://localhost:8000";
+// Trailing slashes and spaces are stripped: "https://x.onrender.com/" + "/students" would be "//students" (404).
+const API = (process.env.API_INTERNAL_URL || "http://localhost:8000").trim().replace(/\/+$/, "");
 // Browser-callable paths only (no Bolna webhooks, no admin graph rebuild).
 const ALLOWED = [
   /^students(\/[\w-]+(\/(graph|progress|memory|overview))?)?$/,
